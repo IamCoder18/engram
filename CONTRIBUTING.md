@@ -31,6 +31,31 @@ cd engram
 Requires a JDK 17 or newer to build. The output targets Java 11 bytecode so it
 drops into an existing FTC team project unchanged.
 
+## Releasing
+
+Publishing is credential-gated and Central does not want half-released
+artifacts, so the sequence matters:
+
+```bash
+# 1. Prove the signed artifacts locally before spending a CI run.
+./gradlew publishToMavenLocal
+gpg --verify ~/.m2/repository/com/aaravlabs/engram-recorder/*/engram-recorder-*.jar.asc \
+                ~/.m2/repository/com/aaravlabs/engram-recorder/*/engram-recorder-*.jar
+
+# 2. Commit, then tag. The tag is what triggers publishing.
+git tag -a v0.1.0 -m "Initial release" && git push origin main --tags
+```
+
+`publish.yml` runs the tests first and only then uploads, so a failing test
+costs no Central deployment. If the upload step fails *after* a partial
+deployment, check whether Central already accepted it before re-running --
+version numbers cannot be reused once published.
+
+`sonatypeUsername` / `sonatypePassword` and `signing.key` / `signing.password`
+are read from Gradle properties or the `SONATYPE_USERNAME`,
+`SONATYPE_PASSWORD`, `SIGNING_KEY`, `SIGNING_PASSWORD` environment variables,
+and live as repository secrets.
+
 ## Before opening a pull request
 
 ```bash

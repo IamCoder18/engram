@@ -17,7 +17,12 @@ dependencies {
     // Compile-time only. The orchestrator is constructed by the FTC team code's
     // SafeOpMode; Engram decorates or subscribes to it and never owns it.
     // Runtime scope is the team's choice.
-    compileOnly "com.aaravlabs:synapse:${synapseVersion}"
+    // Exposed as `api`, not `compileOnly`. EngramSession's public API hands
+    // back and accepts `Orchestrator`, and RecordingOrchestrator implements it,
+    // so a consumer that adds only engram-recorder would otherwise compile and
+    // then fail to link with NoClassDefFoundError. Consumers can still force a
+    // newer Synapse; Gradle resolves the highest version.
+    api "com.aaravlabs:synapse:${synapseVersion}"
     testImplementation "com.aaravlabs:synapse:${synapseVersion}"
 
     // Test-only: lets the round-trip tests in this module write a real

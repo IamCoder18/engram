@@ -6,14 +6,42 @@
 
 plugins {
     id 'base'
+    // The Central Portal aggregation is a publication on the root project, so
+    // the root needs the signing plugin in order to sign it. Maven Central
+    // requires a signature for every artifact *and* for module metadata.
+    id 'signing'
+    // The Central Portal aggregation lives on the root, so the root publishes too.
+    id 'maven-publish'
 }
+
+// Signing credentials, resolved before subprojects {} is evaluated so the
+// closure is in scope inside it. Absent on a normal local build, where signing
+// is simply skipped and only `publishToMavenLocal` is used.
+ext.signingKey = { findProperty('signing.key') ?: System.getenv('SIGNING_KEY') }
+ext.signingPassphrase = { findProperty('signing.password') ?: System.getenv('SIGNING_PASSWORD') }
 
 subprojects {
     apply plugin: 'java-library'
     apply plugin: 'maven-publish'
+    apply plugin: 'signing'
 
     group = project.property('group')
     version = project.property('version')
+
+    // Each module's own publication needs signatures too, not just the root
+    // aggregation's metadata.
+    signing {
+        def key = rootProject.ext.signingKey()
+        def passphrase = rootProject.ext.signingPassphrase()
+        if (key && passphrase) {
+            useInMemoryPgpKeys(key, passphrase)
+            // sign(publications) rather than signAllPublications(): Gradle's
+            // SigningExtension has no signAllPublications method, and signing
+            // the whole container covers every publication including the
+            // Central Portal aggregation.
+            sign project.publishing.publications
+        }
+    }
 
     repositories {
         mavenCentral()
@@ -108,5 +136,17 @@ subprojects {
                 }
             }
         }
+    }
+}
+
+// Sign every publication on the root, which includes the Central Portal
+// aggregation. Naming a single publication would sign that one and let Central
+// reject the release for the unsigned remainder.
+signing {
+    def key = signingKey()
+    def passphrase = signingPassphrase()
+    if (key && passphrase) {
+        useInMemoryPgpKeys(key, passphrase)
+        sign project.publishing.publications
     }
 }

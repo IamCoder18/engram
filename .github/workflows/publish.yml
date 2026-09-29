@@ -1,0 +1,79 @@
+name: Publish
+
+# Publishing is not cheap and Maven Central does not want half-released
+# artifacts, so this runs on a version tag (or an explicit dispatch) and gates
+# the upload behind a full test run. Push the tag once; do not re-run on
+# failure without checking whether Central already accepted the upload.
+permissions:
+  contents: read
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Build and test
+        run: ./gradlew --no-daemon build
+
+      - name: Verify the runnable jar
+        run: |
+          ./gradlew --no-daemon :engram-replay:fatJar
+          java -jar engram-replay/build/libs/engram-replay-*-all.jar --help
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/build/reports/tests/test/'
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    # Tag pushes cannot depend on the separate Test workflow, so tests are
+    # re-run here and the publish job is gated on them succeeding. A failure
+    # here costs no Central deployment quota.
+    needs: test
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Publish to GitHub Packages
+        run: ./gradlew --no-daemon publishMavenPublicationToGitHubPackagesRepository
+        env:
+          GITHUB_USER: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish to Maven Central
+        # Uploads through the Central Portal publisher API (com.gradleup.nmcp)
+        # and auto-releases after validation. The legacy OSSRH staging API
+        # stopped accepting deployments in 2026.
+        run: ./gradlew --no-daemon publishAggregationToCentralPortal
+        env:
+          SONATYPE_USERNAME: ${{ secrets.SONATYPE_USERNAME }}
+          SONATYPE_PASSWORD: ${{ secrets.SONATYPE_PASSWORD }}
+          SIGNING_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.GPG_PASSPHRASE }}

@@ -1,5 +1,31 @@
+plugins {
+    // Publishes to Maven Central via the Central Portal publisher API
+    // (https://central.sonatype.org/publish/publish-portal-api/). The legacy
+    // OSSRH staging API compatibility shim used by gradle-nexus/publish-plugin
+    // stopped accepting deployments in 2026, so publishing goes through NMCP.
+    // Credentials are the user-token username/password pair from
+    // https://central.sonatype.com/usertoken, read from the
+    // sonatypeUsername / sonatypePassword properties or the SONATYPE_USERNAME /
+    // SONATYPE_PASSWORD env vars.
+    id 'com.gradleup.nmcp.settings' version '1.6.2'
+}
+
 rootProject.name = 'engram'
 
 include 'engram-proto'
 include 'engram-recorder'
 include 'engram-replay'
+
+nmcpSettings {
+    centralPortal {
+        username = providers.gradleProperty('sonatypeUsername')
+                .orElse(providers.environmentVariable('SONATYPE_USERNAME'))
+                .getOrElse('')
+        password = providers.gradleProperty('sonatypePassword')
+                .orElse(providers.environmentVariable('SONATYPE_PASSWORD'))
+                .getOrElse('')
+        // Upload and auto-release once validation passes, so artifacts sync to
+        // Maven Central without a manual close-and-release step.
+        publishingType = 'AUTOMATIC'
+    }
+}
