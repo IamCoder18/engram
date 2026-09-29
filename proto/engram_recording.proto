@@ -1,0 +1,122 @@
+// Engram recording wire format.
+//
+// A `.engram` file is a stream of length-delimited protobuf messages:
+//
+//     [RecordingHeader]                      exactly one, first
+//     [RecordingEvent]                       zero or more
+//     [RecordingEvent]
+//     ...
+//
+// Each message is prefixed by its byte length encoded as a varint -- the
+// standard protobuf streaming format (writeDelimitedTo / parseDelimitedFrom).
+//
+// Design notes are in docs/PROTOBUF-SCHEMA.md.
+
+syntax = "proto3";
+
+package engram.recording;
+
+option java_package = "com.aaravlabs.engram.proto";
+option java_outer_classname = "EngramProto";
+
+message RecordingHeader {
+  // Schema version of this file format. Bumped only for breaking changes;
+  // additive fields do not bump it, since protobuf readers ignore unknown
+  // fields.
+  uint32 format_version = 1;
+
+  // Human-readable OpMode class name, e.g. "MyTeleOp".
+  string opmode_name = 2;
+
+  // Wall-clock time at OpMode.init(), milliseconds since the Unix epoch.
+  // Present only so a recording can be correlated with match logs. Replay
+  // timing never uses this -- it always uses rel_time_us.
+  int64 start_epoch_ms = 3;
+}
+
+// How a topic's value is encoded. Declared once per topic, before its first
+// publish, so a reader can validate and type an index without inspecting
+// every event.
+enum ValueType {
+  VALUE_TYPE_UNSPECIFIED = 0;
+
+  // Native protobuf fields on TopicValue.
+  VALUE_TYPE_DOUBLE = 1;
+  VALUE_TYPE_FLOAT = 2;
+  VALUE_TYPE_INT32 = 3;
+  VALUE_TYPE_INT64 = 4;
+  VALUE_TYPE_BOOL = 5;
+  VALUE_TYPE_STRING = 6;
+
+  // Value is carried opaquely in TopicValue.bytes_val. Used for types with a
+  // registered ValueCodec, and as the marker for values the recorder could
+  // not encode.
+  VALUE_TYPE_BYTES = 7;
+}
+
+// Emitted the first time a topic is published, immediately before the publish
+// that triggered it. Building the manifest inline rather than in the header is
+// what lets the recorder stream: a header written at flush time could not
+// describe topics discovered later.
+message TopicDeclaration {
+  // Dense, zero-based id. Referenced by TopicPublish.topic_id for the rest of
+  // the file. Only meaningful within a single file.
+  uint32 topic_id = 1;
+
+  // Full topic name, e.g. "drive/power" or "g1/left_stick_x".
+  string name = 2;
+
+  // Fully qualified Java type of the value, e.g. "java.lang.Double".
+  string java_type = 3;
+
+  ValueType value_type = 4;
+}
+
+message TopicValue {
+  oneof val {
+    double double_val = 1;
+    float float_val = 2;
+    // sint32/sint64 use ZigZag encoding, which costs 1 byte at zero and
+    // scales with magnitude for negatives. Plain int32/int64 would spend
+    // 10 bytes on any negative number. FTC topics are full of small signed
+    // values (encoder counts, positions, deltas), so this is a large win.
+    sint32 int32_val = 3;
+    sint64 int64_val = 4;
+    bool bool_val = 5;
+    string string_val = 6;
+    bytes bytes_val = 7;
+  }
+}
+
+message TopicPublish {
+  // Id from the TopicDeclaration emitted earlier in this file.
+  uint32 topic_id = 1;
+
+  TopicValue value = 2;
+}
+
+message LifecycleEvent {
+  enum Type {
+    LIFECYCLE_INIT = 0;   // OpMode.init()
+    LIFECYCLE_START = 1;  // OpMode.start()
+    LIFECYCLE_STOP = 2;   // OpMode.stop(); always the final event in a
+                          // well-formed file
+  }
+  Type type = 1;
+}
+
+message RecordingEvent {
+  // Microseconds elapsed since LIFECYCLE_INIT, from System.nanoTime() on the
+  // robot. Relative, so replay is immune to wall-clock adjustments.
+  //
+  // Events from different threads may appear out of timestamp order -- that is
+  // faithful to what the robot actually did, not a recording artifact. Readers
+  // must not assume global ordering.
+  uint64 rel_time_us = 1;
+
+  oneof event {
+    LifecycleEvent lifecycle = 2;
+    TopicDeclaration topic_declaration = 3;
+    TopicPublish publish = 4;
+  }
+}

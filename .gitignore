@@ -1,0 +1,28 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local
+local.properties
+*.log
+
+# Recordings produced by local experiments and demos. Real match recordings
+# are pulled off a robot deliberately; they have no business in the repo.
+*.engram
+*.engram.gz
+out/

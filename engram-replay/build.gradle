@@ -1,0 +1,40 @@
+// Engram replay — reads recordings on a desktop.
+//
+// Depends on the shared wire format and the protobuf runtime, and on nothing
+// else. No Synapse, no FTC SDK, no Android: a recording is a self-contained
+// file, and reading one requires none of the machinery that produced it.
+
+plugins {
+    id 'java-library'
+    id 'application'
+}
+
+description = 'Engram replay tool — inspect and export Synapse recordings.'
+
+dependencies {
+    api project(':engram-proto')
+}
+
+application {
+    mainClass = 'com.aaravlabs.engram.replay.cli.Main'
+    applicationName = 'engram'
+}
+
+// A single self-contained jar, so a team can run the tool with nothing but a
+// JRE: `java -jar engram-replay.jar inspect match.engram`.
+tasks.register('fatJar', Jar) {
+    group = 'build'
+    description = 'Builds a self-contained runnable jar including protobuf-java.'
+    archiveClassifier = 'all'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    manifest {
+        attributes 'Main-Class': 'com.aaravlabs.engram.replay.cli.Main'
+    }
+    from sourceSets.main.output
+    dependsOn configurations.runtimeClasspath
+    from {
+        configurations.runtimeClasspath.findAll { it.name.endsWith('.jar') }.collect { zipTree(it) }
+    }
+    // Signature files from dependency jars invalidate a merged archive.
+    exclude 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA', 'META-INF/versions/**'
+}

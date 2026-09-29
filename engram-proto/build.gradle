@@ -1,0 +1,37 @@
+// Shared wire format. Generates the Java message classes from
+// proto/engram_recording.proto and re-exports protobuf-java as an `api`
+// dependency, so consumers get the runtime without declaring it.
+
+plugins {
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+description = 'Engram recording wire format.'
+
+// The schema lives at the repo root in proto/, so both recorder and replay
+// (and any future tooling) reference one copy rather than vendoring their own.
+sourceSets {
+    main {
+        proto {
+            srcDir rootProject.file('proto')
+        }
+    }
+}
+
+dependencies {
+    api "com.google.protobuf:protobuf-java:${protobufVersion}"
+}
+
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:${protobufVersion}"
+    }
+    // The default `java` generator is already applied. Adding it again here
+    // makes protoc emit the same file twice and fail the task, so there is
+    // deliberately no generateProtoTasks/plugins block.
+}
+
+// Keep the generated code out of the sources jar; the .proto is the contract.
+tasks.named('sourcesJar') {
+    exclude '**/*.java'
+}

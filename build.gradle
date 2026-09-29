@@ -1,0 +1,112 @@
+// Engram — root build.
+//
+// Shared configuration for every module. Individual modules add their own
+// plugins and dependencies; cross-cutting settings (Java level, test framework,
+// publishing metadata) live here so they cannot drift between modules.
+
+plugins {
+    id 'base'
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+
+    group = project.property('group')
+    version = project.property('version')
+
+    repositories {
+        mavenCentral()
+    }
+
+    java {
+        // Matches Synapse's target so the recorder drops into an existing
+        // FTC team project without bytecode-level surprises.
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
+        withSourcesJar()
+        withJavadocJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+        // `release` pins the API surface to Java 11 even when building with a
+        // newer JDK, so accidental use of newer APIs fails at compile time.
+        options.release = 11
+        options.compilerArgs << '-Xlint:all' << '-Xlint:-processing' << '-Xlint:-serial'
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
+    dependencies {
+        testImplementation "org.junit.jupiter:junit-jupiter-api:${junitVersion}"
+        testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitVersion}"
+        testRuntimeOnly "org.junit.platform:junit-platform-launcher:${junitPlatformVersion}"
+    }
+
+    tasks.named('test') {
+        useJUnitPlatform()
+        testLogging {
+            events 'passed', 'skipped', 'failed'
+            exceptionFormat 'full'
+            showStandardStreams = false
+        }
+        // Recording tests touch the filesystem and spawn writer threads;
+        // keep them serial so failures are reproducible.
+        maxParallelForks = 1
+    }
+
+    tasks.named('jar') {
+        manifest {
+            attributes(
+                    'Implementation-Title': project.name,
+                    'Implementation-Version': project.version,
+                    'Implementation-Vendor': 'Aarav Labs'
+            )
+        }
+    }
+
+    publishing {
+        publications {
+            maven(MavenPublication) {
+                from components.java
+                pom {
+                    name = project.name
+                    description = project.description ?: 'Engram — record and replay Synapse topic traffic.'
+                    url = 'https://github.com/IamCoder18/engram'
+                    licenses {
+                        license {
+                            name = 'MIT'
+                            url = 'https://opensource.org/licenses/MIT'
+                        }
+                    }
+                    scm {
+                        url = 'https://github.com/IamCoder18/engram'
+                        connection = 'scm:git:git://github.com/IamCoder18/engram.git'
+                        developerConnection = 'scm:git:ssh://git@github.com/IamCoder18/engram.git'
+                    }
+                    developers {
+                        developer {
+                            id = 'IamCoder18'
+                            name = 'IamCoder18'
+                        }
+                    }
+                }
+            }
+        }
+        repositories {
+            mavenLocal()
+            maven {
+                name = 'GitHubPackages'
+                url = 'https://maven.pkg.github.com/IamCoder18/engram'
+                credentials {
+                    username = project.findProperty('gpr.user') ?: System.getenv('GITHUB_USER') ?: System.getenv('GITHUB_ACTOR')
+                    password = project.findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+                }
+            }
+        }
+    }
+}

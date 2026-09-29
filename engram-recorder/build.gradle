@@ -1,0 +1,39 @@
+// Engram recorder — runs on the Android Robot Controller.
+//
+// Capture strategies, buffering, and the value codec SPI. Attaches to a live
+// Synapse orchestrator and streams a recording to disk.
+
+plugins {
+    id 'java-library'
+}
+
+description = 'Engram recorder for the Android Robot Controller.'
+
+dependencies {
+    // Re-exported so consumers of the recorder also get the generated message
+    // classes and the protobuf runtime.
+    api project(':engram-proto')
+
+    // Compile-time only. The orchestrator is constructed by the FTC team code's
+    // SafeOpMode; Engram decorates or subscribes to it and never owns it.
+    // Runtime scope is the team's choice.
+    compileOnly "com.aaravlabs:synapse:${synapseVersion}"
+    testImplementation "com.aaravlabs:synapse:${synapseVersion}"
+
+    // Test-only: lets the round-trip tests in this module write a real
+    // recording and read it back with the production reader, so the two
+    // halves of the format are verified against each other rather than
+    // against a hand-built expectation. engram-replay does not depend on this
+    // module, so this introduces no cycle.
+    testImplementation project(':engram-replay')
+}
+
+// Deliberately no FTC SDK dependency.
+//
+// The obvious API shape -- an `EngramOpMode extends SafeOpMode` base class --
+// would force this module onto org.firstinspires.ftc:RobotCore, which is
+// published only as an .aar and drags in androidx from Google's Maven repo.
+// Engram exposes a plain EngramSession handle instead, which the team wires
+// into their own OpMode. Nothing in this module references OpMode, SafeOpMode,
+// HardwareMap, or any android.* type, so the recorder builds and its tests run
+// on a plain desktop JVM.

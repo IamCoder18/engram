@@ -1,0 +1,5 @@
+rootProject.name = 'engram'
+
+include 'engram-proto'
+include 'engram-recorder'
+include 'engram-replay'
