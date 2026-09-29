@@ -10,8 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -37,14 +36,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class PublishListenerCaptureTest {
 
-    private Path dir;
-    private Path file;
+    private File dir;
+    private File file;
     private Recorder recorder;
 
     @BeforeEach
     void setUp() throws IOException {
-        dir = Files.createTempDirectory("engram-listener");
-        file = dir.resolve("listener.engram");
+        dir = java.nio.file.Files.createTempDirectory("engram-listener").toFile();
+        file = new File(dir, "listener.engram");
         recorder = Recorder.open(file, "ListenerOp");
     }
 
@@ -54,15 +53,7 @@ class PublishListenerCaptureTest {
             recorder.close();
         }
         if (dir != null) {
-            try (java.util.stream.Stream<Path> paths = Files.walk(dir)) {
-                paths.sorted(Collections.reverseOrder()).forEach(p -> {
-                    try {
-                        Files.deleteIfExists(p);
-                    } catch (IOException ignored) {
-                        // best effort
-                    }
-                });
-            }
+            deleteRecursively(dir);
         }
     }
 
@@ -89,10 +80,10 @@ class PublishListenerCaptureTest {
     }
 
     @Test
-    void recordsPublishesDeliveredThroughTheHook(@TempDir Path out) throws IOException {
+    void recordsPublishesDeliveredThroughTheHook(@TempDir File out) throws IOException {
         HookOrchestrator hook = new HookOrchestrator();
         EngramSession session = EngramSession.start(
-                "Hooked", out.resolve("hooked.engram"), hook,
+                "Hooked", new File(out, "hooked.engram"), hook,
                 RecorderConfig.defaults(), "publish-listener");
         try {
             assertEquals("publish-listener", session.strategyName());
@@ -106,7 +97,7 @@ class PublishListenerCaptureTest {
             session.close();
         }
 
-        EngramRecording recording = EngramRecordingReader.read(out.resolve("hooked.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(out, "hooked.engram"));
 
         assertEquals(0.5, (Double) recording.valueAt("drive/power", Long.MAX_VALUE).orElseThrow());
         assertEquals(Boolean.TRUE, recording.valueAt("g1/a", Long.MAX_VALUE).orElseThrow());
@@ -115,10 +106,10 @@ class PublishListenerCaptureTest {
     }
 
     @Test
-    void theTimestampIsCarriedThroughTheProxy(@TempDir Path out) throws IOException {
+    void theTimestampIsCarriedThroughTheProxy(@TempDir File out) throws IOException {
         HookOrchestrator hook = new HookOrchestrator();
         EngramSession session = EngramSession.start(
-                "Timed", out.resolve("timed.engram"), hook,
+                "Timed", new File(out, "timed.engram"), hook,
                 RecorderConfig.defaults(), "publish-listener");
         try {
             // Space the publishes so the relative timestamps are distinguishable.
@@ -129,7 +120,7 @@ class PublishListenerCaptureTest {
             session.close();
         }
 
-        EngramRecording recording = EngramRecordingReader.read(out.resolve("timed.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(out, "timed.engram"));
         List<Long> times = new ArrayList<>();
         recording.samples("ramp").forEach(s -> times.add(s.timeUs()));
 
@@ -140,10 +131,10 @@ class PublishListenerCaptureTest {
     }
 
     @Test
-    void detachStopsFurtherRecording(@TempDir Path out) throws IOException {
+    void detachStopsFurtherRecording(@TempDir File out) throws IOException {
         HookOrchestrator hook = new HookOrchestrator();
         EngramSession session = EngramSession.start(
-                "Detach", out.resolve("detach.engram"), hook,
+                "Detach", new File(out, "detach.engram"), hook,
                 RecorderConfig.defaults(), "publish-listener");
         try {
             hook.fire("before", 1.0);
@@ -154,7 +145,7 @@ class PublishListenerCaptureTest {
         assertTrue(hook.listeners.isEmpty(), "close() must remove the listener");
         assertEquals(1, hook.publishCount, "the listener fires only while attached");
 
-        EngramRecording recording = EngramRecordingReader.read(out.resolve("detach.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(out, "detach.engram"));
         assertTrue(recording.topic("before").isPresent());
         assertFalse(recording.topic("after").isPresent());
     }
@@ -216,7 +207,7 @@ class PublishListenerCaptureTest {
     void theProxySurvivesPublishingFromManyThreads() throws Exception {
         HookOrchestrator hook = new HookOrchestrator();
         EngramSession session = EngramSession.start(
-                "Concurrent", Files.createTempDirectory("engram-conc").resolve("c.engram"),
+                "Concurrent", new File(java.nio.file.Files.createTempDirectory("engram-conc").toFile(), "c.engram"),
                 hook, RecorderConfig.defaults(), "publish-listener");
         try {
             int threads = 6;
@@ -252,4 +243,14 @@ class PublishListenerCaptureTest {
                 "no publish may be lost through the proxy");
     }
 
+    private static void deleteRecursively(File file) {
+        File[] children = file.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                deleteRecursively(child);
+            }
+        }
+        // Best effort: a leftover temp file must not fail a test.
+        file.delete();
+    }
 }

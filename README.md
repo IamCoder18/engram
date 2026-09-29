@@ -25,7 +25,7 @@ experience leaves behind. This captures the trace of a run and plays it back.
 
 ## Status
 
-**0.1.0, working and tested.** 223 tests, including round trips that record
+**0.1.0, working and tested.** 226 tests, including round trips that record
 through a real Synapse orchestrator and read back through the production reader,
 and a stub `PublishListener` that makes the reflective attach path testable.
 
@@ -34,7 +34,7 @@ and a stub `PublishListener` that makes the reflective attach path testable.
 | Module | Runs on | Depends on |
 |--------|---------|-----------|
 | `engram-proto` | — | `protobuf-java` |
-| `engram-recorder` | Robot Controller | `engram-proto`, Synapse *(compile-only)* |
+| `engram-recorder` | Robot Controller (Android API 24+) | `engram-proto`, Synapse *(compile-only)* |
 | `engram-replay` | Desktop | `engram-proto` |
 
 Neither the recorder nor the replay tool depends on the FTC SDK or on Android.

@@ -11,9 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.LocalDateTime;
+import java.io.File;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -66,11 +64,11 @@ class SessionConfigurationTest {
         EngramSession session = EngramSession.start(new FullyAnnotated(), orchestrator);
         try {
             assertEquals("Custom Label", session.recorder().opModeName());
-            assertTrue(session.file().getFileName().toString().startsWith("Custom_Label_"),
+            assertTrue(session.file().getName().startsWith("Custom_Label_"),
                     session.file().toString());
         } finally {
             session.close();
-            Files.deleteIfExists(session.file());
+            session.file().delete();
         }
     }
 
@@ -81,7 +79,7 @@ class SessionConfigurationTest {
             assertEquals("decorator", session.strategyName());
         } finally {
             session.close();
-            Files.deleteIfExists(session.file());
+            session.file().delete();
         }
     }
 
@@ -92,7 +90,7 @@ class SessionConfigurationTest {
             assertEquals("Annotated", session.recorder().opModeName());
         } finally {
             session.close();
-            Files.deleteIfExists(session.file());
+            session.file().delete();
         }
     }
 
@@ -106,7 +104,7 @@ class SessionConfigurationTest {
             session.orchestrator().publish("a", 1.0);
         } finally {
             session.close();
-            Files.deleteIfExists(session.file());
+            session.file().delete();
         }
     }
 
@@ -129,12 +127,12 @@ class SessionConfigurationTest {
                     "a 7-event flush threshold should have written most samples already");
         } finally {
             session.close();
-            Files.deleteIfExists(session.file());
+            session.file().delete();
         }
     }
 
     @Test
-    void aSessionWithoutAnAnnotationStillWorks(@TempDir Path dir) throws IOException {
+    void aSessionWithoutAnAnnotationStillWorks(@TempDir File dir) throws IOException {
         EngramSession session = EngramSession.start(
                 new Plain(), orchestrator,
                 RecorderConfig.builder()
@@ -152,9 +150,9 @@ class SessionConfigurationTest {
     }
 
     @Test
-    void aClassThatIsNotAnOpModeIsHandled(@TempDir Path dir) throws IOException {
+    void aClassThatIsNotAnOpModeIsHandled(@TempDir File dir) throws IOException {
         EngramSession session = EngramSession.start(
-                "a string, not an object graph", dir.resolve("weird.engram"),
+                "a string, not an object graph", new File(dir, "weird.engram"),
                 orchestrator, RecorderConfig.defaults(), "decorator");
         try {
             assertNotNull(session.file());
@@ -239,9 +237,9 @@ class SessionConfigurationTest {
     }
 
     @Test
-    void aCustomLogReceivesEncoderWarnings(@TempDir Path dir) throws IOException {
+    void aCustomLogReceivesEncoderWarnings(@TempDir File dir) throws IOException {
         java.util.List<String> warnings = new java.util.ArrayList<>();
-        try (Recorder recorder = Recorder.open(dir.resolve("log.engram"), "LogOp",
+        try (Recorder recorder = Recorder.open(new File(dir, "log.engram"), "LogOp",
                 RecorderConfig.builder().withLog(warnings::add).build())) {
             recorder.onPublish("w", new ValueEncoderTest.Widget(1), System.nanoTime());
         }
@@ -253,11 +251,18 @@ class SessionConfigurationTest {
     @Test
     void aSessionFileNameEncodesTheLabelAndTimestamp() throws IOException {
         assertEquals("MyOp_2026-01-02_030405.engram",
-                OutputLocation.fileName("MyOp", LocalDateTime.of(2026, 1, 2, 3, 4, 5)));
+                OutputLocation.fileName("MyOp", epoch(2026, 1, 2, 3, 4, 5)));
     }
 
     // ---- helpers ---------------------------------------------------------
 
     static final class Plain {
+    }
+
+    private static long epoch(int y, int m, int d, int h, int min, int s) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.clear();
+        c.set(y, m - 1, d, h, min, s);
+        return c.getTimeInMillis();
     }
 }

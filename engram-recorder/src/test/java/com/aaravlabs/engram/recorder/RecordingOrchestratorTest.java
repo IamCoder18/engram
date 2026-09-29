@@ -35,14 +35,14 @@ class RecordingOrchestratorTest {
     @BeforeEach
     void setUp() throws Exception {
         real = Orchestrator.create("passthrough");
-        recorder = Recorder.open(java.nio.file.Files.createTempFile("engram", ".engram"), "Op");
+        recorder = Recorder.open(java.io.File.createTempFile("engram", ".engram"), "Op");
         wrapper = new RecordingOrchestrator(real, recorder);
     }
 
     @AfterEach
     void tearDown() throws Exception {
         wrapper.close();
-        java.nio.file.Files.deleteIfExists(recorder.file());
+        recorder.file().delete();
     }
 
     @Test

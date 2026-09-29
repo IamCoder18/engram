@@ -15,6 +15,10 @@ design rather than by review alone:
 2. **The recorder must not require the robot.** `engram-recorder` compiles with
    no FTC SDK and no Android dependency, and its tests run on a desktop JVM.
    Please keep it that way; it is what makes the recorder testable at all.
+3. **The recorder must run on Android API 24**, the minimum the FTC SDK
+   declares. That rules out `java.nio.file` and `java.time`, which are API 26.
+   `NoAndroidApiLeakTest` fails the build if either reappears, so you will find
+   out immediately rather than at a competition.
 
 ## Getting set up
 

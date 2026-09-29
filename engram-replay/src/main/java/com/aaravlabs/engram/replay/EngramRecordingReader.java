@@ -3,6 +3,8 @@ package com.aaravlabs.engram.replay;
 import com.aaravlabs.engram.proto.EngramProto;
 
 import java.io.BufferedInputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -43,6 +45,18 @@ public final class EngramRecordingReader {
     /** Reads a recording from a file. */
     public static EngramRecording read(Path file) throws IOException {
         try (InputStream raw = new BufferedInputStream(Files.newInputStream(file), 64 * 1024)) {
+            return read(raw, file.toString());
+        }
+    }
+
+    /**
+     * Reads a recording from a {@link File}.
+     *
+     * <p>Convenience for callers holding a {@code File} — notably
+     * {@code Recorder#file()}, which returns one.
+     */
+    public static EngramRecording read(File file) throws IOException {
+        try (InputStream raw = new BufferedInputStream(new FileInputStream(file), 64 * 1024)) {
             return read(raw, file.toString());
         }
     }

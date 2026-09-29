@@ -6,8 +6,7 @@ import com.aaravlabs.synapse.ftc.BulkReader;
 import com.aaravlabs.synapse.ftc.HardwareView;
 
 import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.io.File;
 
 /**
  * A recording session: a recorder attached to one live orchestrator, for the
@@ -123,7 +122,7 @@ public final class EngramSession implements AutoCloseable {
      * @throws IOException if the recording file cannot be created
      */
     public static EngramSession start(String label,
-                                      Path file,
+                                      File file,
                                       Orchestrator orchestrator,
                                       RecorderConfig config,
                                       String forcedStrategy) throws IOException {
@@ -138,8 +137,10 @@ public final class EngramSession implements AutoCloseable {
             recorder.close();
             throw e;
         }
+        File parent = file.getAbsoluteFile().getParentFile();
         return new EngramSession(recorder, strategy, strategy.orchestrator(),
-                OutputLocation.of(file.toAbsolutePath().getParent()), effectiveConfig);
+                parent == null ? OutputLocation.of(new File(".")) : OutputLocation.of(parent),
+                effectiveConfig);
     }
 
     /**
@@ -156,7 +157,7 @@ public final class EngramSession implements AutoCloseable {
     }
 
     /** The file being written. */
-    public Path file() {
+    public File file() {
         return recorder.file();
     }
 
@@ -262,12 +263,8 @@ public final class EngramSession implements AutoCloseable {
         return simple == null || simple.isEmpty() ? "opmode" : simple;
     }
 
-    /** Convenience for tests: an explicit file under a temporary directory. */
-    public static EngramSession forTesting(Path file, Orchestrator orchestrator) throws IOException {
-        Path parent = file.toAbsolutePath().getParent();
-        if (parent == null) {
-            parent = Paths.get(".").toAbsolutePath().normalize();
-        }
+    /** Convenience for tests: an explicit file. */
+    public static EngramSession forTesting(File file, Orchestrator orchestrator) throws IOException {
         return start("TestOpMode", file, orchestrator, RecorderConfig.defaults(), null);
     }
 }

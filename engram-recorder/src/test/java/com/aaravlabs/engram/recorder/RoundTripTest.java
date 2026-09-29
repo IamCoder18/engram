@@ -20,7 +20,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.StringWriter;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -55,9 +55,9 @@ class RoundTripTest {
     }
 
     @Test
-    void aRecordedRunReadsBackWithEveryValueIntact(@TempDir Path dir) throws IOException {
+    void aRecordedRunReadsBackWithEveryValueIntact(@TempDir File dir) throws IOException {
         EngramSession session = EngramSession.start(
-                "RoundTrip", dir.resolve("run.engram"), orchestrator, RecorderConfig.defaults(), null);
+                "RoundTrip", new File(dir, "run.engram"), orchestrator, RecorderConfig.defaults(), null);
         try {
             Orchestrator bus = session.orchestrator();
             session.markStart();
@@ -76,7 +76,7 @@ class RoundTripTest {
             session.close();
         }
 
-        EngramRecording recording = EngramRecordingReader.read(dir.resolve("run.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(dir, "run.engram"));
 
         assertFalse(recording.isTruncated());
         assertEquals("RoundTrip", recording.opModeName());
@@ -96,9 +96,9 @@ class RoundTripTest {
     }
 
     @Test
-    void topicManifestDescribesEveryRecordedTopic(@TempDir Path dir) throws IOException {
+    void topicManifestDescribesEveryRecordedTopic(@TempDir File dir) throws IOException {
         EngramSession session = EngramSession.start(
-                "Manifest", dir.resolve("m.engram"), orchestrator, RecorderConfig.defaults(), null);
+                "Manifest", new File(dir, "m.engram"), orchestrator, RecorderConfig.defaults(), null);
         try {
             session.orchestrator().publish("motor/left/vel", 120.5);
             session.orchestrator().publish("count", 7);
@@ -106,7 +106,7 @@ class RoundTripTest {
             session.close();
         }
 
-        EngramRecording recording = EngramRecordingReader.read(dir.resolve("m.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(dir, "m.engram"));
 
         TopicInfo vel = recording.topic("motor/left/vel").orElseThrow();
         assertEquals("java.lang.Double", vel.javaType());
@@ -120,9 +120,9 @@ class RoundTripTest {
     }
 
     @Test
-    void valuesFromANodeDrivingARealPublishLoopAreCaptured(@TempDir Path dir) throws Exception {
+    void valuesFromANodeDrivingARealPublishLoopAreCaptured(@TempDir File dir) throws Exception {
         EngramSession session = EngramSession.start(
-                "NodeRun", dir.resolve("node.engram"), orchestrator, RecorderConfig.defaults(), null);
+                "NodeRun", new File(dir, "node.engram"), orchestrator, RecorderConfig.defaults(), null);
         Orchestrator bus = session.orchestrator();
 
         // A real Node with an annotated periodic loop, registered through the
@@ -140,7 +140,7 @@ class RoundTripTest {
         }
         session.close();
 
-        EngramRecording recording = EngramRecordingReader.read(dir.resolve("node.engram"));
+        EngramRecording recording = EngramRecordingReader.read(new File(dir, "node.engram"));
 
         long ticks = recording.topic("driver/ticks")
                 .orElseThrow(() -> new AssertionError("the node's publishes were not recorded"))
@@ -153,8 +153,8 @@ class RoundTripTest {
     }
 
     @Test
-    void pointInTimeQueriesFollowTheTimeline(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("timeline.engram");
+    void pointInTimeQueriesFollowTheTimeline(@TempDir File dir) throws IOException {
+        File file = new File(dir, "timeline.engram");
         EngramSession session = EngramSession.start(
                 "Timeline", file, orchestrator, RecorderConfig.defaults(), null);
         long base;
@@ -193,8 +193,8 @@ class RoundTripTest {
     }
 
     @Test
-    void timeRangeQueriesSelectTheRightSamples(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("range.engram");
+    void timeRangeQueriesSelectTheRightSamples(@TempDir File dir) throws IOException {
+        File file = new File(dir, "range.engram");
         EngramSession session = EngramSession.start(
                 "Range", file, orchestrator, RecorderConfig.defaults(), null);
         long base;
@@ -218,8 +218,8 @@ class RoundTripTest {
     }
 
     @Test
-    void statisticsSummariseATopic(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("stats.engram");
+    void statisticsSummariseATopic(@TempDir File dir) throws IOException {
+        File file = new File(dir, "stats.engram");
         EngramSession session = EngramSession.start(
                 "Stats", file, orchestrator, RecorderConfig.defaults(), null);
         long base;
@@ -243,8 +243,8 @@ class RoundTripTest {
     }
 
     @Test
-    void aGzippedRecordingReadsIdentically(@TempDir Path dir) throws IOException {
-        Path plain = dir.resolve("plain.engram");
+    void aGzippedRecordingReadsIdentically(@TempDir File dir) throws IOException {
+        File plain = new File(dir, "plain.engram");
         EngramSession session = EngramSession.start(
                 "Gzip", plain, orchestrator, RecorderConfig.defaults(), null);
         for (int i = 0; i < 200; i++) {
@@ -252,9 +252,9 @@ class RoundTripTest {
         }
         session.close();
 
-        Path gzipped = dir.resolve("zipped.engram.gz");
-        try (GZIPOutputStream out = new GZIPOutputStream(java.nio.file.Files.newOutputStream(gzipped))) {
-            out.write(java.nio.file.Files.readAllBytes(plain));
+        File gzipped = new File(dir, "zipped.engram.gz");
+        try (GZIPOutputStream out = new GZIPOutputStream(new java.io.FileOutputStream(gzipped))) {
+            out.write(readAllBytes(plain));
         }
 
         EngramRecording fromPlain = EngramRecordingReader.read(plain);
@@ -263,13 +263,13 @@ class RoundTripTest {
         assertEquals(fromPlain.topics().size(), fromGzip.topics().size());
         assertEquals(fromPlain.samples("g").size(), fromGzip.samples("g").size());
         assertEquals(fromPlain.valueAt("g", Long.MAX_VALUE), fromGzip.valueAt("g", Long.MAX_VALUE));
-        assertTrue(java.nio.file.Files.size(gzipped) < java.nio.file.Files.size(plain),
+        assertTrue(gzipped.length() < plain.length(),
                 "gzip should shrink a repetitive recording");
     }
 
     @Test
-    void everyExporterProducesOutputFromARealRecording(@TempDir Path dir) throws Exception {
-        Path file = dir.resolve("export.engram");
+    void everyExporterProducesOutputFromARealRecording(@TempDir File dir) throws Exception {
+        File file = new File(dir, "export.engram");
         EngramSession session = EngramSession.start(
                 "Export", file, orchestrator, RecorderConfig.defaults(), null);
         try {
@@ -304,8 +304,8 @@ class RoundTripTest {
     }
 
     @Test
-    void unknownTopicsAreRejectedRatherThanSilentlyEmpty(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("unknown.engram");
+    void unknownTopicsAreRejectedRatherThanSilentlyEmpty(@TempDir File dir) throws IOException {
+        File file = new File(dir, "unknown.engram");
         EngramSession session = EngramSession.start(
                 "Unknown", file, orchestrator, RecorderConfig.defaults(), null);
         session.orchestrator().publish("real", 1.0);
@@ -319,8 +319,8 @@ class RoundTripTest {
     }
 
     @Test
-    void concurrentPublishingAcrossThreadsSurvivesTheRoundTrip(@TempDir Path dir) throws Exception {
-        Path file = dir.resolve("concurrent.engram");
+    void concurrentPublishingAcrossThreadsSurvivesTheRoundTrip(@TempDir File dir) throws Exception {
+        File file = new File(dir, "concurrent.engram");
         EngramSession session = EngramSession.start(
                 "Concurrent", file, orchestrator, RecorderConfig.defaults(), null);
         Orchestrator bus = session.orchestrator();
@@ -377,6 +377,18 @@ class RoundTripTest {
         return out;
     }
 
+    private static byte[] readAllBytes(File file) throws IOException {
+        try (java.io.FileInputStream in = new java.io.FileInputStream(file)) {
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int n;
+            while ((n = in.read(buffer)) > 0) {
+                out.write(buffer, 0, n);
+            }
+            return out.toByteArray();
+        }
+    }
+
     private static String render(WriterConsumer body) throws IOException {
         StringWriter writer = new StringWriter();
         body.write(writer);
@@ -410,8 +422,8 @@ class RoundTripTest {
     }
 
     @Test
-    void unrecordedValuesSurfaceAsTheSentinelRatherThanNull(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("unrecorded.engram");
+    void unrecordedValuesSurfaceAsTheSentinelRatherThanNull(@TempDir File dir) throws IOException {
+        File file = new File(dir, "unrecorded.engram");
         EngramSession session = EngramSession.start(
                 "Unrecorded", file, orchestrator,
                 RecorderConfig.builder().withLog(m -> { }).build(), null);

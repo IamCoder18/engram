@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -44,7 +44,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void decoratorStrategyRecordsPublishesAndWrapsTheOrchestrator(@TempDir Path dir) throws IOException {
+    void decoratorStrategyRecordsPublishesAndWrapsTheOrchestrator(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         try {
             assertEquals("decorator", session.strategyName());
@@ -63,7 +63,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void publishingStillReachesSubscribersThroughTheWrapper(@TempDir Path dir) throws Exception {
+    void publishingStillReachesSubscribersThroughTheWrapper(@TempDir File dir) throws Exception {
         EngramSession session = start(dir, "decorator");
         try {
             List<Double> received = new ArrayList<>();
@@ -82,7 +82,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void latestValueCacheStillWorksThroughTheWrapper(@TempDir Path dir) throws IOException {
+    void latestValueCacheStillWorksThroughTheWrapper(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         try {
             session.orchestrator().publish("cached", 7.0);
@@ -94,7 +94,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void lifecycleIsRecordedAcrossStartAndStop(@TempDir Path dir) throws IOException {
+    void lifecycleIsRecordedAcrossStartAndStop(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         session.markStart();
         session.orchestrator().publish("a", 1.0);
@@ -108,7 +108,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void closeIsIdempotentAndFinalizesTheFile(@TempDir Path dir) throws IOException {
+    void closeIsIdempotentAndFinalizesTheFile(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         session.orchestrator().publish("a", 1.0);
 
@@ -122,7 +122,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void publishingAfterCloseIsNotRecorded(@TempDir Path dir) throws IOException {
+    void publishingAfterCloseIsNotRecorded(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         Orchestrator wrapped = session.orchestrator();
         session.close();
@@ -136,7 +136,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void closeLeavesTheOrchestratorOpenBecauseTheSessionDoesNotOwnIt(@TempDir Path dir) throws IOException {
+    void closeLeavesTheOrchestratorOpenBecauseTheSessionDoesNotOwnIt(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         assertFalse(orchestrator.isClosed());
         session.close();
@@ -149,7 +149,7 @@ class EngramSessionTest {
     // ---- the bulkRead gap ------------------------------------------------
 
     @Test
-    void sensorPublishesThroughTheOriginalHardwareViewAreNotRecorded(@TempDir Path dir) throws IOException {
+    void sensorPublishesThroughTheOriginalHardwareViewAreNotRecorded(@TempDir File dir) throws IOException {
         // This documents a real limitation rather than a bug: Synapse binds
         // HardwareView to the concrete orchestrator inside SafeOpMode.init(),
         // before Engram runs, so the decorator cannot observe those publishes.
@@ -167,7 +167,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void sensorPublishesThroughARecordingViewAreRecorded(@TempDir Path dir) throws IOException {
+    void sensorPublishesThroughARecordingViewAreRecorded(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         try {
             // What EngramSession#recording does for a bulkRead callback.
@@ -184,7 +184,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void recordingReturnsTheReaderUnchangedWhenSensorCaptureIsAutomatic(@TempDir Path dir) throws IOException {
+    void recordingReturnsTheReaderUnchangedWhenSensorCaptureIsAutomatic(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "auto");
         try {
             com.aaravlabs.synapse.ftc.BulkReader reader = view -> { };
@@ -199,7 +199,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void recordingRejectsANullReader(@TempDir Path dir) throws IOException {
+    void recordingRejectsANullReader(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         try {
             assertThrows(IllegalArgumentException.class, () -> session.recording(null));
@@ -211,7 +211,7 @@ class EngramSessionTest {
     // ---- strategy selection ---------------------------------------------
 
     @Test
-    void aPlainOrchestratorStillFallsBackToTheDecorator(@TempDir Path dir) throws IOException {
+    void aPlainOrchestratorStillFallsBackToTheDecorator(@TempDir File dir) throws IOException {
         // The PublishListener interface is on the test classpath (see the stub
         // in com.aaravlabs.synapse), but a stock Synapse 0.4.0 orchestrator has
         // no addPublishListener method. Selection must key off the
@@ -227,27 +227,27 @@ class EngramSessionTest {
     }
 
     @Test
-    void forcingAnUnavailableStrategyFailsLoudly(@TempDir Path dir) {
+    void forcingAnUnavailableStrategyFailsLoudly(@TempDir File dir) {
         assertThrows(IllegalStateException.class, () -> EngramSession.start(
-                "Op", dir.resolve("forced.engram"), orchestrator, RecorderConfig.defaults(),
+                "Op", new File(dir, "forced.engram"), orchestrator, RecorderConfig.defaults(),
                 "publish-listener"));
     }
 
     @Test
-    void unknownStrategyIsARejectedArgument(@TempDir Path dir) {
+    void unknownStrategyIsARejectedArgument(@TempDir File dir) {
         assertThrows(IllegalArgumentException.class, () -> EngramSession.start(
-                "Op", dir.resolve("bad.engram"), orchestrator, RecorderConfig.defaults(), "telepathy"));
+                "Op", new File(dir, "bad.engram"), orchestrator, RecorderConfig.defaults(), "telepathy"));
     }
 
     @Test
-    void startRejectsANullOrchestrator(@TempDir Path dir) {
+    void startRejectsANullOrchestrator(@TempDir File dir) {
         assertThrows(IllegalArgumentException.class, () -> EngramSession.start(
-                "Op", dir.resolve("null.engram"), null, RecorderConfig.defaults(), null));
+                "Op", new File(dir, "null.engram"), null, RecorderConfig.defaults(), null));
     }
 
     @Test
-    void sessionExposesItsFileAndRecorder(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("exposed.engram");
+    void sessionExposesItsFileAndRecorder(@TempDir File dir) throws IOException {
+        File file = new File(dir, "exposed.engram");
         EngramSession session = EngramSession.start(
                 "Op", file, orchestrator, RecorderConfig.defaults(), null);
         try {
@@ -260,7 +260,7 @@ class EngramSessionTest {
     }
 
     @Test
-    void statsAreAvailableBeforeAndAfterClose(@TempDir Path dir) throws IOException {
+    void statsAreAvailableBeforeAndAfterClose(@TempDir File dir) throws IOException {
         EngramSession session = start(dir, "decorator");
         session.orchestrator().publish("a", 1.0);
         assertTrue(session.stats().publishesRecorded() >= 1);
@@ -270,14 +270,25 @@ class EngramSessionTest {
 
     // ---- helpers ---------------------------------------------------------
 
-    private EngramSession start(Path dir, String strategy) throws IOException {
+    private EngramSession start(File dir, String strategy) throws IOException {
         return EngramSession.start(
-                "TestOpMode", dir.resolve("session-" + strategy + ".engram"),
+                "TestOpMode", new File(dir, "session-" + strategy + ".engram"),
                 orchestrator, RecorderConfig.defaults(), strategy);
     }
 
-    private static EngramRecording read(Path dir) throws IOException {
-        return EngramRecordingReader.read(dir.resolve("session-decorator.engram"));
+    private static void deleteRecursively(File file) {
+        File[] children = file.listFiles();
+        if (children != null) {
+            for (File child : children) {
+                deleteRecursively(child);
+            }
+        }
+        // Best effort: a leftover temp file must not fail a test.
+        file.delete();
+    }
+
+    private static EngramRecording read(File dir) throws IOException {
+        return EngramRecordingReader.read(new File(dir, "session-decorator.engram"));
     }
 
     /** Reads mid-session by flushing queued events and parsing what is there. */

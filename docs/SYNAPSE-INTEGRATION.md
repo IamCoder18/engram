@@ -12,6 +12,7 @@ shaped the whole design.
 | `SafeOpMode.init()` is `final` | Blocking | Solved without touching Synapse, via a session handle |
 | FTC SDK is `.aar`-only and drags in AndroidX | Blocking | Solved by not depending on the SDK at all |
 | `hardware` facade is bound before any Engram code runs | Same as #1 | See below |
+| `OpMode` exposes no Android `Context` | Silent misbehaviour | Resolved via `AppUtil.getDefContext()` |
 
 ---
 
@@ -241,6 +242,56 @@ If a base class is ever wanted, it can be added in a separate optional module
 that carries the SDK dependency, without contaminating the recorder.
 
 ---
+
+## Problem 4: `OpMode` exposes no Android `Context`
+
+Found by inspecting the real SDK rather than assuming. `RobotCore`'s
+`OpMode` extends `OpModeInternal`, and neither declares `getContext()` or
+`getApplicationContext()`:
+
+```
+$ javap -cp classes.jar com.qualcomm.robotcore.eventloop.opmode.OpMode
+public abstract class ...OpMode extends ...OpModeInternal {
+  public volatile double time;
+  public volatile ...Gamepad gamepad1;
+  public volatile ...Gamepad gamepad2;
+  public ...Telemetry telemetry;
+  public volatile ...HardwareMap hardwareMap;
+  ...
+}
+$ javap -cp classes.jar com.qualcomm.robotcore.eventloop.opmode.OpModeInternal
+abstract class ...OpModeInternal {
+  public static final int MS_BEFORE_FORCE_STOP_AFTER_STOP_REQUESTED;
+  ... the same fields, plus internal bookkeeping ...
+}
+```
+
+No Context accessor anywhere in the chain. So the obvious way to reach a
+`Context` from an OpMode — `((Context) opMode).getExternalFilesDir(null)`, or
+`opMode.getContext()` — does not exist. Engram's original implementation tried
+`getContext()` reflectively, which would have found nothing on every real
+device, making the app-external-files candidate dead code while its test
+passed against a stand-in object that happened to expose the method.
+
+The route that actually works is the one the SDK itself uses:
+
+```java
+org.firstinspires.ftc.robotcore.internal.system.AppUtil.getDefContext()
+    // -> android.app.Application, a Context
+```
+
+Verified present on RobotCore 8.0 through 12.0. `OutputLocation` now tries three
+routes in order: the object itself if it answers `getExternalFilesDir`,
+`getContext`/`getApplicationContext` on the object, then `AppUtil`. All are
+reflective, so this still costs no compile-time dependency.
+
+One subtlety worth recording: `Method.invoke` enforces accessibility of the
+*declaring class*, not just the method. Reaching the directory through
+`AppUtil` works on a device because `android.app.Application` is public; had the
+SDK returned something package-private, the call would have thrown
+`IllegalAccessException` and been swallowed as "route unavailable". The test
+double for `AppUtil` therefore returns a *public* nested class, and the failure
+mode is a silent fallback rather than a crash.
 
 ## Version compatibility
 

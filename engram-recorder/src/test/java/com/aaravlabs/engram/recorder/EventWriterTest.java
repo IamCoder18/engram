@@ -7,14 +7,12 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -173,10 +171,10 @@ class EventWriterTest {
     }
 
     @Test
-    void reportsWrittenCountsAndBytes(@TempDir Path dir) throws IOException {
-        Path out = dir.resolve("counts.bin");
+    void reportsWrittenCountsAndBytes(@TempDir File dir) throws IOException {
+        File out = new File(dir, "counts.bin");
         EventWriter writer = new EventWriter(
-                java.nio.file.Files.newOutputStream(out), 60_000, 500);
+                new java.io.FileOutputStream(out), 60_000, 500);
         writer.offer("abc".getBytes(StandardCharsets.UTF_8));
         writer.offer("de".getBytes(StandardCharsets.UTF_8));
         writer.close();
@@ -184,7 +182,7 @@ class EventWriterTest {
         assertEquals(2, writer.writtenEventCount());
         assertEquals(5, writer.writtenByteCount());
         assertEquals(0, writer.pendingCount());
-        assertFalse(Files.exists(out) && Files.size(out) == 0, "content should be flushed");
+        assertTrue(out.length() > 0, "content should be flushed");
     }
 
     // ---- stream fixtures -------------------------------------------------

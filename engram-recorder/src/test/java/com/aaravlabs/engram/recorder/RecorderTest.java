@@ -7,8 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -28,8 +27,8 @@ class RecorderTest {
     // ---- file structure --------------------------------------------------
 
     @Test
-    void writesAHeaderAsTheVeryFirstMessage(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("a.engram");
+    void writesAHeaderAsTheVeryFirstMessage(@TempDir File dir) throws IOException {
+        File file = new File(dir, "a.engram");
         try (Recorder recorder = Recorder.open(file, "MyTeleOp")) {
             recorder.onPublish("a", 1.0, System.nanoTime());
         }
@@ -43,8 +42,8 @@ class RecorderTest {
     }
 
     @Test
-    void writesExactlyOneHeaderEvenWithManyPublishes(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("b.engram");
+    void writesExactlyOneHeaderEvenWithManyPublishes(@TempDir File dir) throws IOException {
+        File file = new File(dir, "b.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             for (int i = 0; i < 50; i++) {
                 recorder.onPublish("a", 1.0, System.nanoTime());
@@ -58,8 +57,8 @@ class RecorderTest {
     }
 
     @Test
-    void emitsInitThenStopAroundTheRun(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("c.engram");
+    void emitsInitThenStopAroundTheRun(@TempDir File dir) throws IOException {
+        File file = new File(dir, "c.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             recorder.onPublish("a", 1.0, System.nanoTime());
         }
@@ -73,8 +72,8 @@ class RecorderTest {
     }
 
     @Test
-    void recordsStartWhenAskedAndOnlyOnce(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("d.engram");
+    void recordsStartWhenAskedAndOnlyOnce(@TempDir File dir) throws IOException {
+        File file = new File(dir, "d.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             recorder.recordStart();
             recorder.recordStart();
@@ -90,8 +89,8 @@ class RecorderTest {
     }
 
     @Test
-    void startIsAbsentWhenNeverRecorded(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("e.engram");
+    void startIsAbsentWhenNeverRecorded(@TempDir File dir) throws IOException {
+        File file = new File(dir, "e.engram");
         // Deliberately no recordStart(): the point is what that omits.
         Recorder.open(file, "Op").close();
 
@@ -104,8 +103,8 @@ class RecorderTest {
     // ---- topic declaration ----------------------------------------------
 
     @Test
-    void declaresEachTopicOnceWithItsNameAndType(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("f.engram");
+    void declaresEachTopicOnceWithItsNameAndType(@TempDir File dir) throws IOException {
+        File file = new File(dir, "f.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             for (int i = 0; i < 20; i++) {
                 recorder.onPublish("drive/power", 0.5, System.nanoTime());
@@ -127,8 +126,8 @@ class RecorderTest {
     }
 
     @Test
-    void declarationImmediatelyPrecedesThePublishThatTriggeredIt(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("g.engram");
+    void declarationImmediatelyPrecedesThePublishThatTriggeredIt(@TempDir File dir) throws IOException {
+        File file = new File(dir, "g.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             recorder.onPublish("first", 1.0, System.nanoTime());
         }
@@ -146,8 +145,8 @@ class RecorderTest {
     }
 
     @Test
-    void idsAreDenseAndReusedAcrossPublishes(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("h.engram");
+    void idsAreDenseAndReusedAcrossPublishes(@TempDir File dir) throws IOException {
+        File file = new File(dir, "h.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             for (int i = 0; i < 5; i++) {
                 recorder.onPublish("a", 1.0, System.nanoTime());
@@ -177,8 +176,8 @@ class RecorderTest {
     // ---- values ----------------------------------------------------------
 
     @Test
-    void roundTripsEverySupportedValueType(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("i.engram");
+    void roundTripsEverySupportedValueType(@TempDir File dir) throws IOException {
+        File file = new File(dir, "i.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             recorder.onPublish("d", 3.25, System.nanoTime());
             recorder.onPublish("f", 1.5f, System.nanoTime());
@@ -201,8 +200,8 @@ class RecorderTest {
     }
 
     @Test
-    void recordsUnencodableValuesAsEmptyAndCountsThem(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("j.engram");
+    void recordsUnencodableValuesAsEmptyAndCountsThem(@TempDir File dir) throws IOException {
+        File file = new File(dir, "j.engram");
         Recorder recorder = Recorder.open(file, "Op", RecorderConfig.builder()
                 .withLog(m -> { })
                 .build());
@@ -228,8 +227,8 @@ class RecorderTest {
     }
 
     @Test
-    void usesARegisteredCodecForCustomTypes(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("k.engram");
+    void usesARegisteredCodecForCustomTypes(@TempDir File dir) throws IOException {
+        File file = new File(dir, "k.engram");
         try (Recorder recorder = Recorder.open(file, "Op", RecorderConfig.builder()
                 .withCodec(new WidgetCodec())
                 .build())) {
@@ -245,8 +244,8 @@ class RecorderTest {
     // ---- timestamps ------------------------------------------------------
 
     @Test
-    void timestampsAreRelativeToTheRecorderStart(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("l.engram");
+    void timestampsAreRelativeToTheRecorderStart(@TempDir File dir) throws IOException {
+        File file = new File(dir, "l.engram");
         long base;
         try (Recorder recorder = Recorder.open(file, "Op")) {
             base = System.nanoTime();
@@ -265,8 +264,8 @@ class RecorderTest {
     }
 
     @Test
-    void clampsTimestampsThatPrecedeTheStart(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("m.engram");
+    void clampsTimestampsThatPrecedeTheStart(@TempDir File dir) throws IOException {
+        File file = new File(dir, "m.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             // A timestamp from before the recorder existed must not produce a
             // negative offset.
@@ -279,8 +278,8 @@ class RecorderTest {
     }
 
     @Test
-    void samplesTheClockWhenGivenNoTimestamp(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("n.engram");
+    void samplesTheClockWhenGivenNoTimestamp(@TempDir File dir) throws IOException {
+        File file = new File(dir, "n.engram");
         Recorder recorder = Recorder.open(file, "Op");
         recorder.onPublish("a", 1.0, 0);
         recorder.onPublish("a", 2.0, -1);
@@ -295,8 +294,8 @@ class RecorderTest {
     // ---- lifecycle of the object ----------------------------------------
 
     @Test
-    void closeIsIdempotent(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("o.engram");
+    void closeIsIdempotent(@TempDir File dir) throws IOException {
+        File file = new File(dir, "o.engram");
         Recorder recorder = Recorder.open(file, "Op");
         recorder.onPublish("a", 1.0, System.nanoTime());
 
@@ -310,8 +309,8 @@ class RecorderTest {
     }
 
     @Test
-    void publishesAfterCloseAreCountedAsDropped(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("p.engram");
+    void publishesAfterCloseAreCountedAsDropped(@TempDir File dir) throws IOException {
+        File file = new File(dir, "p.engram");
         Recorder recorder = Recorder.open(file, "Op");
         recorder.close();
 
@@ -322,8 +321,8 @@ class RecorderTest {
     }
 
     @Test
-    void topicCountReflectsDeclaredTopics(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("q.engram");
+    void topicCountReflectsDeclaredTopics(@TempDir File dir) throws IOException {
+        File file = new File(dir, "q.engram");
         try (Recorder recorder = Recorder.open(file, "Op")) {
             assertEquals(0, recorder.topicCount());
             recorder.onPublish("a", 1.0, System.nanoTime());
@@ -334,8 +333,8 @@ class RecorderTest {
     }
 
     @Test
-    void exposesTheFileAndOpModeName(@TempDir Path dir) throws IOException {
-        Path file = dir.resolve("r.engram");
+    void exposesTheFileAndOpModeName(@TempDir File dir) throws IOException {
+        File file = new File(dir, "r.engram");
         try (Recorder recorder = Recorder.open(file, "NamedOp")) {
             assertEquals(file, recorder.file());
             assertEquals("NamedOp", recorder.opModeName());
@@ -343,32 +342,33 @@ class RecorderTest {
     }
 
     @Test
-    void createsMissingParentDirectories(@TempDir Path dir) throws IOException {
-        Path nested = dir.resolve("a/b/c/deep.engram");
+    void createsMissingParentDirectories(@TempDir File dir) throws IOException {
+        File nested = new File(dir, "a/b/c/deep.engram");
         try (Recorder recorder = Recorder.open(nested, "Op")) {
             recorder.onPublish("a", 1.0, System.nanoTime());
         }
-        assertTrue(Files.exists(nested));
+        assertTrue(nested.isFile());
     }
 
     @Test
-    void rejectsNullArguments(@TempDir Path dir) {
+    void rejectsNullArguments(@TempDir File dir) {
         assertThrows(IllegalArgumentException.class, () -> Recorder.open(null, "Op"));
-        assertThrows(IllegalArgumentException.class, () -> Recorder.open(dir.resolve("x"), null));
+        assertThrows(IllegalArgumentException.class, () -> Recorder.open(new File(dir, "x"), null));
     }
 
     @Test
-    void propagatesAnUnwritablePath(@TempDir Path dir) throws IOException {
+    void propagatesAnUnwritablePath(@TempDir File dir) throws IOException {
         // A directory cannot be opened as a file.
-        Path dirAsFile = Files.createDirectory(dir.resolve("adir.engram"));
+        File dirAsFile = new File(dir, "adir.engram");
+        assertTrue(dirAsFile.mkdirs(), "fixture setup");
         assertThrows(IOException.class, () -> Recorder.open(dirAsFile, "Op"));
     }
 
     // ---- concurrency -----------------------------------------------------
 
     @Test
-    void recordsEveryPublishFromManyThreads(@TempDir Path dir) throws Exception {
-        Path file = dir.resolve("s.engram");
+    void recordsEveryPublishFromManyThreads(@TempDir File dir) throws Exception {
+        File file = new File(dir, "s.engram");
         int threads = 6;
         int perThread = 500;
 
@@ -409,9 +409,9 @@ class RecorderTest {
 
     // ---- parsing helpers -------------------------------------------------
 
-    private static List<Object> readAll(Path file) throws IOException {
+    private static List<Object> readAll(File file) throws IOException {
         List<Object> messages = new ArrayList<>();
-        try (InputStream in = Files.newInputStream(file)) {
+        try (InputStream in = new java.io.FileInputStream(file)) {
             // One header, then a run of events. Reading the header repeatedly
             // would feed events to the wrong parser.
             Object message = EngramProto.RecordingHeader.parseDelimitedFrom(in);

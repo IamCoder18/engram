@@ -148,10 +148,21 @@ change are in [SYNAPSE-INTEGRATION.md](SYNAPSE-INTEGRATION.md).
 `EngramSession` resolves the first writable directory from:
 
 1. `/sdcard/FIRST/engram` — the standard FTC directory, reachable over USB
-2. the app's external files directory, found reflectively via an Android
-   `Context` (needs no runtime permission on any API level)
+2. the app's external files directory, reached reflectively through
+   `AppUtil.getDefContext()` (needs no runtime permission on any API level; the
+   SDK's own `OpMode` has no `Context` accessor, so this is the only route that
+   works on a real device)
 3. the JVM's `java.io.tmpdir`, which on Android is the app's own cache
-   directory — always writable, but not USB-visible
+   directory — always writable, but **not** USB-visible
+
+Check where it landed, especially on the first run:
+
+```java
+telemetry.addLine("engram -> " + engram.file());
+if (!engram.location().isUsbVisible()) {
+    telemetry.addLine("WARNING: not USB-visible, pull it with adb");
+}
+```
 
 Filenames look like `MyTeleOp_2026-09-28_144523.engram`.
 
@@ -168,11 +179,16 @@ directly:
 ```java
 EngramSession session = EngramSession.start(
         "MyTeleOp",                    // label recorded in the header
-        Paths.get("/sdcard/match.engram"),
+        new File("/sdcard/match.engram"),
         orchestrator,
         RecorderConfig.defaults(),
         null);                         // strategy: null = auto
 ```
+
+The recorder's API is built on `java.io.File`, not `java.nio.file`: the FTC SDK
+declares `minSdkVersion=24` and `java.nio.file` is API 26, so the latter would
+throw `NoClassDefFoundError` on an older Robot Controller. The replay tool is
+desktop-only and accepts either a `File` or a `Path`.
 
 ---
 

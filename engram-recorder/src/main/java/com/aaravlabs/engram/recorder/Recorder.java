@@ -6,8 +6,7 @@ import java.io.BufferedOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
+import java.io.File;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -25,6 +24,10 @@ import java.util.concurrent.atomic.AtomicLong;
  * encoded to bytes and queued, and a background thread drains the queue to
  * disk.
  *
+ * <h2>Platform</h2>
+ * Uses {@link File} rather than {@code java.nio.file} because the FTC SDK
+ * declares {@code minSdkVersion=24} while {@code java.nio.file} is API 26.
+ *
  * <h2>Failure policy</h2>
  * Nothing thrown by this class propagates back into the robot's control flow.
  * A publish that cannot be encoded is recorded as empty bytes and counted in
@@ -40,7 +43,7 @@ public final class Recorder implements Closeable {
     /** Version stamped into every file header. */
     public static final int FORMAT_VERSION = 1;
 
-    private final Path file;
+    private final File file;
     private final String opModeName;
     private final long startNanos;
     private final ValueEncoder encoder;
@@ -56,7 +59,7 @@ public final class Recorder implements Closeable {
     private volatile boolean closed;
     private volatile boolean startRecorded;
 
-    private Recorder(Path file, String opModeName, RecorderConfig config, OutputStream out) throws IOException {
+    private Recorder(File file, String opModeName, RecorderConfig config, OutputStream out) throws IOException {
         this.file = file;
         this.opModeName = opModeName;
         this.config = config;
@@ -91,7 +94,7 @@ public final class Recorder implements Closeable {
      *
      * @throws IOException if the file cannot be created
      */
-    public static Recorder open(Path file, String opModeName) throws IOException {
+    public static Recorder open(File file, String opModeName) throws IOException {
         return open(file, opModeName, RecorderConfig.defaults());
     }
 
@@ -101,16 +104,16 @@ public final class Recorder implements Closeable {
      * @param opModeName recorded in the header; also used in the default filename
      * @throws IOException if the file cannot be created
      */
-    public static Recorder open(Path file, String opModeName, RecorderConfig config) throws IOException {
+    public static Recorder open(File file, String opModeName, RecorderConfig config) throws IOException {
         if (file == null) throw new IllegalArgumentException("file must not be null");
         if (opModeName == null) throw new IllegalArgumentException("opModeName must not be null");
         RecorderConfig effective = config == null ? RecorderConfig.defaults() : config;
 
-        Path parent = file.getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
+        File parent = file.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new IOException("cannot create directory " + parent);
         }
-        OutputStream out = new BufferedOutputStream(Files.newOutputStream(file), 64 * 1024);
+        OutputStream out = new BufferedOutputStream(new java.io.FileOutputStream(file), 64 * 1024);
         try {
             return new Recorder(file, opModeName, effective, out);
         } catch (IOException | RuntimeException e) {
@@ -212,7 +215,7 @@ public final class Recorder implements Closeable {
     }
 
     /** The file being written. */
-    public Path file() {
+    public File file() {
         return file;
     }
 

@@ -219,7 +219,7 @@ plain desktop JVM.
 
 ## Testing
 
-223 tests. The structure is deliberate:
+226 tests. The structure is deliberate:
 
 - **`ProtoFramingTest`** pins the hand-rolled length-delimited framing against
   protobuf's own encoder, across every varint width boundary. The recorder
@@ -241,6 +241,13 @@ plain desktop JVM.
   Synapse ships it entirely untested. A dynamic proxy is deliberately *not* used
   as the stand-in: a proxy only exposes methods its interfaces declare, so it
   would silently fail the lookup and quietly exercise the decorator instead.
+- **`NoAndroidApiLeakTest`** scans the compiled recorder's constant pools for
+  `java/time/` and `java/nio/file/`, which are Android API 26 while the FTC SDK
+  declares `minSdkVersion=24`. Using either would throw
+  `NoClassDefFoundError` on an API 24/25 Robot Controller — a failure no desktop
+  test would catch, and a bad one to meet at a competition. The recorder is
+  therefore built on `java.io.File` and `java.text.SimpleDateFormat`, and this
+  test fails the build if that regresses.
 - **`engram-replay`'s tests** construct protobuf messages directly and never use
   the recorder, because `engram-replay` does not depend on it. That way a
   matching mistake in the writer and the reader cannot cancel out.

@@ -61,7 +61,7 @@ protobuf file and reads it back on a desktop for timing analysis.
 - A self-contained runnable jar (`fatJar`).
 
 ### Test coverage
-- 223 tests, 0 skipped.
+- 226 tests, 0 skipped.
 - The reflective `PublishListener` attach path is covered by a test-source stub
   of `com.aaravlabs.synapse.PublishListener` plus a real orchestrator class
   declaring the hook, since that path cannot execute against a Synapse build
@@ -72,6 +72,19 @@ protobuf file and reads it back on a desktop for timing analysis.
 - Truncation fixtures append a deliberately partial message rather than slicing
   at an offset, which can land on a message boundary and produce a clean end of
   stream instead of genuine truncation.
+
+### Android compatibility
+- The recorder targets the FTC SDK's declared `minSdkVersion=24`. It uses
+  `java.io.File` and `java.text.SimpleDateFormat` rather than `java.nio.file`
+  and `java.time`, which are API 26 and would throw `NoClassDefFoundError` on an
+  API 24/25 device. `NoAndroidApiLeakTest` enforces this by scanning the
+  compiled classes.
+- `OutputLocation` reaches an Android `Context` through
+  `AppUtil.getDefContext()`, because RobotCore's `OpMode` and `OpModeInternal`
+  expose no `getContext()`. Verified by inspecting RobotCore 8.0-12.0.
+- `OutputLocation#isUsbVisible()` reports whether the chosen directory can be
+  pulled off the robot, so a recording that landed in the app's private cache
+  says so instead of looking equally fine.
 
 ### Design notes
 - The recorder module has **no FTC SDK dependency**. The obvious
