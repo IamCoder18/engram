@@ -20,6 +20,15 @@ plugins {
 ext.signingKey = { findProperty('signing.key') ?: System.getenv('SIGNING_KEY') }
 ext.signingPassphrase = { findProperty('signing.password') ?: System.getenv('SIGNING_PASSWORD') }
 
+repositories {
+    // The root project needs its own repository declaration even though it
+    // publishes no code of its own: NMCP's own check task resolves
+    // `com.gradleup.nmcp:nmcp-tasks` through the root's configurations, and
+    // without this the publish fails at nmcpCheckAggregationFiles with
+    // "no repositories are defined" before uploading anything.
+    mavenCentral()
+}
+
 subprojects {
     apply plugin: 'java-library'
     apply plugin: 'maven-publish'
