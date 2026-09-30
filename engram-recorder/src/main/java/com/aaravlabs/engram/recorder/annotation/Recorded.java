@@ -54,4 +54,27 @@ public @interface Recorded {
      * a given Synapse build selects.
      */
     String strategy() default "auto";
+
+    /**
+     * Maximum total bytes the output directory may hold in recordings; 0 (the
+     * default) for no size limit.
+     *
+     * <p>Set this or {@link #retentionMaxRecordings()} to opt in to pruning
+     * old recordings. Both default to 0, which disables retention entirely: a
+     * recorder that deletes files nobody asked it to delete is a worse surprise
+     * than a full SD card.
+     */
+    long retentionMaxBytes() default 0L;
+
+    /**
+     * Maximum number of recordings to keep; 0 (the default) for no count
+     * limit. See {@link #retentionMaxBytes()}.
+     */
+    int retentionMaxRecordings() default 0;
+
+    /**
+     * Recordings kept whatever the limits say, so an over-tight limit degrades
+     * into "kept more than asked for" rather than "no recordings at all".
+     */
+    int retentionMinRetained() default com.aaravlabs.engram.recorder.RetentionPolicy.DEFAULT_MIN_RETAINED;
 }

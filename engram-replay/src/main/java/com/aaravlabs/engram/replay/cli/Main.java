@@ -1,5 +1,6 @@
 package com.aaravlabs.engram.replay.cli;
 
+import com.aaravlabs.engram.replay.CaptureReport;
 import com.aaravlabs.engram.replay.EngramRecording;
 import com.aaravlabs.engram.replay.EngramRecordingReader;
 import com.aaravlabs.engram.replay.Sample;
@@ -30,6 +31,22 @@ import java.util.Locale;
  */
 public final class Main {
 
+    /** Success. */
+    public static final int EXIT_OK = 0;
+
+    /** The file could not be read. */
+    public static final int EXIT_UNREADABLE = 1;
+
+    /** The command line was wrong. */
+    public static final int EXIT_USAGE = 2;
+
+    /**
+     * The file was read, but the recording is missing something. Only
+     * returned by {@code inspect --strict}, so a script can fail on an
+     * incomplete capture without a human reading the output.
+     */
+    public static final int EXIT_INCOMPLETE = 3;
+
     private static final String USAGE = String.join(System.lineSeparator(),
             "engram — read and inspect Synapse recordings",
             "",
@@ -45,6 +62,8 @@ public final class Main {
             "",
             "OPTIONS",
             "  --topic <name>    Restrict to one topic",
+            "  --expect-topic <name>  Assert this topic is in the recording (inspect, repeatable)",
+            "  --strict          inspect exits 3 if the recording is incomplete",
             "  --from <micros>   Range start, microseconds since recording start (inclusive)",
             "  --to <micros>     Range end, microseconds since recording start (inclusive)",
             "  --format <fmt>    json | ndjson | csv   (export only, default json)",
@@ -55,7 +74,12 @@ public final class Main {
             "NOTES",
             "  Gzipped recordings are read transparently.",
             "  A recording that ends mid-message is reported as truncated; the",
-            "  data before the truncation is still queried normally.");
+            "  data before the truncation is still queried normally.",
+            "",
+            "  inspect reports whether the capture was COMPLETE. A file with no",
+            "  LIFECYCLE_STOP was killed mid-run. A topic the capture path never",
+            "  saw cannot be detected from the file alone, so pass",
+            "  --expect-topic to assert the ones you care about.");
 
     private static final java.util.Set<String> KNOWN_COMMANDS =
             java.util.Collections.unmodifiableSet(new java.util.LinkedHashSet<>(
@@ -71,7 +95,9 @@ public final class Main {
     /**
      * Runs one command.
      *
-     * @return a process exit code: 0 on success, 1 on error, 2 on bad usage
+     * @return a process exit code: 0 on success, 1 on an unreadable file, 2 on
+     *         bad usage, 3 when {@code inspect --strict} finds the recording
+     *         incomplete
      */
     public static int run(String[] args, PrintStream out, PrintStream err) {
         try {
@@ -130,11 +156,10 @@ public final class Main {
         try {
             switch (command) {
                 case "inspect":
-                    inspect(recording, out);
-                    return 0;
+                    return inspect(recording, opts, out);
                 case "topics":
                     topics(recording, opts, out);
-                    return 0;
+                    return EXIT_OK;
                 case "query":
                     return query(recording, opts, out, err);
                 case "export":
@@ -144,16 +169,18 @@ public final class Main {
             }
         } catch (IllegalArgumentException e) {
             err.println("error: " + e.getMessage());
-            return 2;
+            return EXIT_USAGE;
         } catch (IOException e) {
             err.println("error: " + e.getMessage());
-            return 1;
+            return EXIT_UNREADABLE;
         }
     }
 
     // ---- commands --------------------------------------------------------
 
-    private static void inspect(EngramRecording r, PrintStream out) {
+    private static int inspect(EngramRecording r, Options opts, PrintStream out) {
+        CaptureReport report = r.captureReport(opts.expectTopics);
+
         out.printf(Locale.ROOT, "OpMode       %s%n", r.opModeName());
         out.printf(Locale.ROOT, "Format       v%d%n", r.formatVersion());
         out.printf(Locale.ROOT, "Started      %s%n", epochToLocal(r.startEpochMs()));
@@ -169,27 +196,63 @@ public final class Main {
         if (r.stopTimeUs() >= 0) {
             out.printf(Locale.ROOT, "stop at      %s%n", formatMicros(r.stopTimeUs()));
         }
-        if (r.isTruncated()) {
-            out.printf(Locale.ROOT, "WARNING      file is truncated (%s);%n", r.truncationReason());
-            out.printf(Locale.ROOT, "             the robot likely died before its final flush%n");
+
+        // Completeness comes before the topic table: whether the recording can
+        // be trusted decides how the table below should be read.
+        out.println();
+        printCapture(report, out);
+
+        if (!r.topics().isEmpty()) {
+            out.println();
+            out.printf(Locale.ROOT, "%-32s %-24s %8s %10s %s%n", "TOPIC", "TYPE", "PUBLISHES", "RATE (Hz)", "RANGE");
+            for (TopicInfo t : r.topics()) {
+                TopicStats s = r.stats(t.id());
+                String range = s.min().isPresent()
+                        ? String.format(Locale.ROOT, "%.4g .. %.4g", s.min().get(), s.max().get())
+                        : "-";
+                out.printf(Locale.ROOT, "%-32s %-24s %8d %10.2f %s%n",
+                        t.name(), shortType(t.javaType()), t.publishCount(), s.averageRateHz(), range);
+                if (t.unrecordedCount() > 0) {
+                    out.printf(Locale.ROOT, "%-32s %d value(s) had no registered codec%n",
+                            "", t.unrecordedCount());
+                }
+            }
         }
 
-        if (r.topics().isEmpty()) {
-            return;
+        // The exit code: 3 for an incomplete capture, but only under --strict.
+        // Without it the command still succeeds, because a crashed recording is
+        // data to be read rather than an error to be refused.
+        return opts.strict && !report.isComplete() ? EXIT_INCOMPLETE : EXIT_OK;
+    }
+
+    /**
+     * Prints the completeness block, in the same key/value shape as the rest of
+     * {@code inspect}.
+     */
+    private static void printCapture(CaptureReport report, PrintStream out) {
+        out.printf(Locale.ROOT, "Capture      %s%n", report.isComplete() ? "COMPLETE" : "INCOMPLETE");
+        out.printf(Locale.ROOT, "Finalized    %s%n", report.isFinalized() ? "yes" : "no");
+        out.printf(Locale.ROOT, "Declared     %d topics, %d observed with publishes%n",
+                report.declaredTopicCount(), report.observedTopicCount());
+        if (!report.expectedTopics().isEmpty()) {
+            out.printf(Locale.ROOT, "Expected     %d named, %d missing%n",
+                    report.expectedTopics().size(), report.missingExpectedTopics().size());
         }
-        out.println();
-        out.printf(Locale.ROOT, "%-32s %-24s %8s %10s %s%n", "TOPIC", "TYPE", "PUBLISHES", "RATE (Hz)", "RANGE");
-        for (TopicInfo t : r.topics()) {
-            TopicStats s = r.stats(t.id());
-            String range = s.min().isPresent()
-                    ? String.format(Locale.ROOT, "%.4g .. %.4g", s.min().get(), s.max().get())
-                    : "-";
-            out.printf(Locale.ROOT, "%-32s %-24s %8d %10.2f %s%n",
-                    t.name(), shortType(t.javaType()), t.publishCount(), s.averageRateHz(), range);
-            if (t.unrecordedCount() > 0) {
-                out.printf(Locale.ROOT, "%-32s %d value(s) had no registered codec%n",
-                        "", t.unrecordedCount());
+        for (CaptureReport.Finding f : report.findings()) {
+            out.printf(Locale.ROOT, "             %s: %s%n", f.code(), f.message());
+            if (!f.topics().isEmpty()) {
+                out.printf(Locale.ROOT, "             %s%n", String.join(", ", f.topics()));
             }
+        }
+        if (report.isComplete()) {
+            out.printf(Locale.ROOT, "             every declared topic has publishes and the run closed cleanly%n");
+        }
+        if (report.isTruncated()) {
+            // Kept as its own WARNING line: truncation has been the loudest
+            // thing in this output since 0.1.0, and scripts and eyes both look
+            // for it.
+            out.printf(Locale.ROOT, "WARNING      file is truncated (%s);%n", report.truncationReason());
+            out.printf(Locale.ROOT, "             the robot likely died before its final flush%n");
         }
     }
 
@@ -360,6 +423,16 @@ public final class Main {
         String out;
         double speed = 1.0;
 
+        /**
+         * Topics the caller insists should be in the recording. A file cannot
+         * say which topics it was meant to contain, so the expectation has to
+         * come from outside it.
+         */
+        final java.util.List<String> expectTopics = new java.util.ArrayList<>();
+
+        /** Whether an incomplete capture should be an error rather than a report. */
+        boolean strict;
+
         static Options parse(String[] args, int start, PrintStream err) {
             Options o = new Options();
             for (int i = start; i < args.length; i++) {
@@ -367,6 +440,12 @@ public final class Main {
                 switch (a) {
                     case "--topic":
                         o.topic = need(args, ++i, "--topic", err);
+                        break;
+                    case "--expect-topic":
+                        o.expectTopics.add(need(args, ++i, "--expect-topic", err));
+                        break;
+                    case "--strict":
+                        o.strict = true;
                         break;
                     case "--from":
                         o.from = parseLong(need(args, ++i, "--from", err), "--from", err);

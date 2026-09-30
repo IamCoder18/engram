@@ -1,5 +1,6 @@
 package com.aaravlabs.engram.replay.export;
 
+import com.aaravlabs.engram.replay.CaptureReport;
 import com.aaravlabs.engram.replay.EngramRecording;
 import com.aaravlabs.engram.replay.Sample;
 import com.aaravlabs.engram.replay.TopicInfo;
@@ -18,6 +19,7 @@ import java.util.List;
  *   "formatVersion": 1, "opMode": "...", "startEpochMs": 0,
  *   "initTimeUs": 0, "startTimeUs": 150000, "stopTimeUs": 5010000,
  *   "truncated": false,
+ *   "capture": { "complete": true, "finalized": true, "problems": [] },
  *   "topics":   [ { "id": 0, "name": "...", "javaType": "...", "publishes": 1800 }, ... ],
  *   "samples":  [ { "t": 0, "topicId": 0, "topic": "...", "value": 0.0 }, ... ]
  * }
@@ -66,6 +68,33 @@ public final class JsonExporter {
             out.write(",\n  \"truncationReason\": " + Json.quote(recording.truncationReason()));
         }
         out.write(",\n");
+
+        // ---- capture completeness ----
+        // A consumer rendering this document cannot tell an empty topics array
+        // from a robot that was killed mid-match, and that difference is the
+        // whole reason the file exists.
+        CaptureReport capture = recording.captureReport();
+        out.write("  \"capture\": {\"complete\": " + capture.isComplete()
+                + ", \"finalized\": " + capture.isFinalized()
+                + ", \"declaredTopics\": " + Json.number(capture.declaredTopicCount())
+                + ", \"observedTopics\": " + Json.number(capture.observedTopicCount())
+                + ", \"problems\": [");
+        boolean firstProblem = true;
+        for (CaptureReport.Finding finding : capture.findings()) {
+            out.write(firstProblem ? "\n" : ",\n");
+            firstProblem = false;
+            out.write("    {\"code\": " + Json.quote(finding.code())
+                    + ", \"message\": " + Json.quote(finding.message())
+                    + ", \"topics\": [");
+            boolean firstTopic = true;
+            for (String topic : finding.topics()) {
+                out.write(firstTopic ? "" : ", ");
+                firstTopic = false;
+                out.write(Json.quote(topic));
+            }
+            out.write("]}");
+        }
+        out.write(firstProblem ? "]},\n" : "\n  ]},\n");
 
         // ---- topics ----
         out.write("  \"topics\": [");

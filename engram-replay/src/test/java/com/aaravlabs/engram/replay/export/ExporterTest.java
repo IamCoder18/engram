@@ -268,6 +268,45 @@ class ExporterTest {
     }
 
     @Test
+    void jsonCarriesTheCaptureVerdictSoConsumersNeedNotReimplementIt() throws IOException {
+        // A killed robot is the case where a consumer most needs to know it is
+        // looking at an incomplete capture: the topics array looks perfectly
+        // ordinary, and without the verdict a dashboard shows a clean run.
+        List<EngramProto.RecordingEvent> events = new ArrayList<>();
+        events.add(EngramProto.RecordingEvent.newBuilder()
+                .setRelTimeUs(0)
+                .setLifecycle(EngramProto.LifecycleEvent.newBuilder()
+                        .setType(EngramProto.LifecycleEvent.Type.LIFECYCLE_INIT))
+                .build());
+        events.add(EngramProto.RecordingEvent.newBuilder().setRelTimeUs(1)
+                .setTopicDeclaration(EngramProto.TopicDeclaration.newBuilder()
+                        .setTopicId(0).setName("drive/power").setJavaType("java.lang.Double")
+                        .setValueType(EngramProto.ValueType.VALUE_TYPE_DOUBLE))
+                .build());
+        events.add(sample(100, 0, EngramProto.TopicValue.newBuilder().setDoubleVal(1.0).build()));
+
+        EngramRecording r = EngramRecordingReader.read(new ByteArrayInputStream(
+                withTruncatedTail(file(events), 24)), "test");
+
+        String json = render(w -> JsonExporter.export(r, w));
+        assertTrue(json.contains("\"complete\": false"), json);
+        assertTrue(json.contains("\"finalized\": false"), json);
+        assertTrue(json.contains("\"code\": \"unfinalized\""), json);
+        assertTrue(json.contains("\"code\": \"truncated\""), json);
+        assertTrue(json.contains("\"declaredTopics\": 1"), json);
+        assertTrue(json.contains("\"observedTopics\": 1"), json);
+    }
+
+    @Test
+    void aHealthyExportSaysItIsCompleteWithNoProblems() throws IOException {
+        String json = render(w -> JsonExporter.export(recording(), w));
+
+        assertTrue(json.contains("\"complete\": true"), json);
+        assertTrue(json.contains("\"finalized\": true"), json);
+        assertTrue(json.contains("\"problems\": []"), json);
+    }
+
+    @Test
     void jsonReportsATruncatedRecordingWithItsReason() throws IOException {
         // A crashed robot is exactly when this matters, so the reason has to
         // survive into the export rather than being dropped silently.

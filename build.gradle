@@ -85,7 +85,13 @@ subprojects {
     }
 
     tasks.named('test') {
-        useJUnitPlatform()
+        useJUnitPlatform {
+            // `soak` is match-length load tests: minutes long, timing-sensitive,
+            // and reporting measurements rather than checking an invariant.
+            // They stay out of `build` so the default build is fast; run them
+            // with `./gradlew soakTest`.
+            excludeTags 'soak'
+        }
         testLogging {
             events 'passed', 'skipped', 'failed'
             exceptionFormat 'full'
@@ -94,6 +100,37 @@ subprojects {
         // Recording tests touch the filesystem and spawn writer threads;
         // keep them serial so failures are reproducible.
         maxParallelForks = 1
+    }
+
+    // The soak counterpart of `test`: same source set, opposite tag selection,
+    // so neither can drift from the other.
+    tasks.register('soakTest', Test) {
+        group = 'verification'
+        description = 'Runs the `soak`-tagged match-length load tests. Not part of `build`.'
+
+        testClassesDirs = sourceSets.test.output.classesDirs
+        classpath = sourceSets.test.runtimeClasspath
+
+        useJUnitPlatform {
+            includeTags 'soak'
+        }
+
+        // Serial by construction, and never up to date: the point of the task
+        // is a fresh measurement, and a cached pass is not one.
+        maxParallelForks = 1
+        outputs.upToDateWhen { false }
+
+        // A real match by default, overridable so the numbers can be seen
+        // without waiting out two and a half minutes.
+        systemProperty 'engram.soak.seconds',
+                project.findProperty('engram.soak.seconds') ?: '150'
+
+        testLogging {
+            events 'passed', 'failed'
+            exceptionFormat 'full'
+            // The measurements are the deliverable, so they are printed.
+            showStandardStreams = true
+        }
     }
 
     tasks.named('jar') {

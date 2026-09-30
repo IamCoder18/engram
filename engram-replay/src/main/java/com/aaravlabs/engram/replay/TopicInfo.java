@@ -16,6 +16,7 @@ public final class TopicInfo {
     private final long firstTimeUs;
     private final long lastTimeUs;
     private final int unrecordedCount;
+    private final boolean declared;
 
     TopicInfo(int id,
               String name,
@@ -24,7 +25,8 @@ public final class TopicInfo {
               int publishCount,
               long firstTimeUs,
               long lastTimeUs,
-              int unrecordedCount) {
+              int unrecordedCount,
+              boolean declared) {
         this.id = id;
         this.name = name;
         this.javaType = javaType;
@@ -33,6 +35,7 @@ public final class TopicInfo {
         this.firstTimeUs = firstTimeUs;
         this.lastTimeUs = lastTimeUs;
         this.unrecordedCount = unrecordedCount;
+        this.declared = declared;
     }
 
     /** Dense id assigned by the recorder, unique within this recording. */
@@ -79,6 +82,19 @@ public final class TopicInfo {
     /** Publishes whose value could not be encoded, recorded as empty bytes. */
     public int unrecordedCount() {
         return unrecordedCount;
+    }
+
+    /**
+     * Whether the recording carried this topic's {@code TopicDeclaration}.
+     *
+     * <p>False only for a topic seen through publishes alone, which the
+     * recorder does not produce: declarations are queued before the publish
+     * that triggers them. A file with one is damaged, and the manifest entry
+     * is synthesised from the id alone, which is why {@link #name()} reads
+     * {@code topic-N} rather than a real topic name.
+     */
+    public boolean isDeclared() {
+        return declared;
     }
 
     /** Gap between the first and last publish, in microseconds. */

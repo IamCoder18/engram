@@ -7,7 +7,68 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+**Match-length soak test.** `MatchLengthSoakTest` drives a 150-second run at
+roughly 1,150 publishes per second from four threads shaped like a real OpMode
+(60 Hz gamepads, a 100 Hz control node, 20 Hz `bulkRead` bursts of ten sensor
+values, 5 Hz telemetry), and measures the two claims that were previously only
+argued in prose: per-publish latency and whether the recorder accumulates without
+bound. It is tagged `soak`, excluded from `test`, and run by
+`./gradlew soakTest`; `-Pengram.soak.seconds=N` shortens it. It prints its
+measurements and asserts only on invariants that must hold on any machine, plus
+one deliberately loose p99 budget — the reasoning is in the class Javadoc.
+
+**Recording retention.** `RetentionPolicy`, configurable through the existing
+mechanisms (`RecorderConfig.builder().withRetention(...)` and the `@Recorded`
+annotation), bounds how much storage the output directory may hold by deleting the
+oldest recordings. Two limits, maximum total bytes and maximum recording count,
+with a floor of recordings always kept. It runs before a recording starts and on
+a background thread after it ends, never deletes the recording being written,
+never touches anything that is not a recording, and degrades to a reported
+failure rather than an exception. Off by default: Engram deletes nothing unless
+asked. `EngramSession#lastPruneResult()` reports what a pass did.
+
+**Capture completeness in `engram inspect`.** A new `Capture` section reports
+whether the recording is actually complete: `unfinalized` (no
+`LIFECYCLE_STOP`, i.e. killed mid-run), `truncated`, `declared-never-published`,
+`undeclared-topic`, `missing-init`, `no-topics`, and `missing-expected-topic`.
+`--expect-topic <name>` (repeatable) asserts topics the caller cares about, and
+`--strict` turns an incomplete capture into exit code 3. `engram export
+--format json` carries the same verdict in a `capture` object.
+
+### Changed
+
+- `TopicInfo` gained `isDeclared()`, distinguishing a topic whose declaration the
+  file carried from one the reader synthesised out of a publish.
+- `inspect` prints a `Capture` block before the topic table. The pre-existing
+  truncation `WARNING` line is unchanged, so anything reading that output still
+  works, and `inspect` still exits 0 for an incomplete file unless `--strict` is
+  passed.
+- `Recorder` gained `bufferedEventCount()`, the queue depth the soak uses to
+  observe whether the writer is keeping up.
+- Retention passes are queued on a single background worker instead of being
+  suppressed when one is already running. A suppressed pass is a directory that
+  stays over its configured limit with nothing scheduled to come back for it —
+  the next session, which on a robot may be the next practice session. Passes
+  are still serialised rather than run concurrently, because two passes can
+  select the same oldest file and the loser's refused delete would abort it
+  early.
+
+### Fixed
+
+- `EngramSession#completedPrunePasses()`. `lastPruneResult()` alone cannot
+  distinguish "no pass has finished yet" from "the pass I was waiting for has
+  already finished", because the pass after `close()` is dispatched before
+  `close()` returns and the background thread often wins that race. A caller
+  polling for a newer result could wait forever for a result that had already
+  arrived — the retained-recording test failed roughly one run in six for exactly
+  that reason, and reported the very result it had been waiting for as the
+  symptom.
+
+### Test coverage
+
+- 276 tests, 0 skipped, plus the opt-in soak.
 
 ## [0.1.0] — 2026-09-28
 

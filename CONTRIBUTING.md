@@ -68,6 +68,23 @@ The build must be green. There are no skipped or ignored tests, and no
 `@Ignore`s; if a test is hard to write, that is usually a sign the design could
 be simpler.
 
+## Load tests
+
+```bash
+./gradlew soakTest                              # 150 s, one real match
+./gradlew :engram-recorder:soakTest \
+    -Pengram.soak.seconds=20                     # a shorter look at the numbers
+```
+
+`soak` tests are excluded from `test` and run by the `soakTest` task, because a
+150-second wall-clock test has no business inside `./gradlew build`.
+
+When adding one, decide deliberately whether each assertion is strict or
+informational, and say which in the class Javadoc. A timing assertion that
+fails on a loaded CI runner trains people to ignore the whole task; the
+`MatchLengthSoakTest` header is the worked example of a split that survives
+contact with someone else's runner.
+
 ## Testing expectations
 
 - **New behaviour needs a test.** The suite covers the wire format, the encoder,
@@ -77,6 +94,9 @@ be simpler.
   buffer or the topic registry should be exercised from several threads, because
   those run on the OpMode loop, the hardware thread, and the callback pool at
   once.
+- **Claims about the publish path need a measurement.** "Does not block" and
+  "does not allocate without bound" are not reviewable by reading; see
+  [Load tests](#load-tests).
 - **The wire format needs byte-level tests.** `ProtoFramingTest` pins the
   length-delimited framing against protobuf's own encoder. If you change framing,
   that test is the one that must keep passing.

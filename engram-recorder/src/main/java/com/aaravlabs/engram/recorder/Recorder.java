@@ -246,6 +246,19 @@ public final class Recorder implements Closeable {
         writer.flushNow();
     }
 
+    /**
+     * Events encoded but not yet written to disk.
+     *
+     * <p>Cheap enough for a status display, and the number that says whether
+     * the writer is keeping up: it rises while publishes arrive faster than the
+     * writer drains the queue, and falls back to zero every flush. A recording
+     * that is running away from the disk shows up here as a number that never
+     * returns to zero.
+     */
+    public int bufferedEventCount() {
+        return writer.pendingCount();
+    }
+
     private static EngramProto.RecordingEvent lifecycleEvent(long relMicros, EngramProto.LifecycleEvent.Type type) {
         return event(relMicros, EngramProto.LifecycleEvent.newBuilder().setType(type).build());
     }

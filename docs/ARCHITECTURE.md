@@ -147,6 +147,106 @@ Recording is diagnostics. A bad recording must not cost a match.
 
 ---
 
+## Recording retention
+
+`RetentionPolicy` bounds how much storage a directory of recordings occupies by
+deleting the oldest ones. Two limits, both optional and both accounted for in
+`PruneResult`:
+
+- **max total bytes** — the sum of the recording files' sizes.
+- **max recording count** — how many files survive.
+
+No maximum age. `File.lastModified()` is the only timestamp available, its
+resolution depends on the FAT32 card the Robot Controller uses, and a
+wall-clock policy is the one most likely to delete this morning's practice on
+the morning of a competition. Count and size are deterministic, need no clock,
+and are what the storage limit actually cares about.
+
+### Ordering and the floor
+
+Candidates are sorted by last-modified ascending, with the file name as the
+tie-break so a pass stays repeatable when two runs share a timestamp to the
+second. The oldest goes first, so the newest is the last thing at risk.
+Deletion stops at `minRetained`, so an over-tight limit degrades into "kept more
+than you asked for" rather than "the robot has no recordings".
+
+Retention is **off by default**. A recorder that deletes files nobody asked it to
+delete is a worse surprise than a full SD card, and the storage problem only
+appears after a season of practice — which is exactly when a team can decide what
+to keep.
+
+### Never deleting the live recording
+
+`prune(File directory, File inProgress)` takes the recording currently being
+written and skips it, matched by canonical path so a caller holding
+`./run.engram` still protects `run.engram`. The invariant matters more than the
+tidy API: a pass that deleted the file being written would leave a header-only
+recording that reads as a clean, empty run.
+
+### Not on the write path
+
+Pruning is a directory listing plus one `delete` per candidate — filesystem I/O,
+and therefore forbidden from the publishing path by the same rule that keeps
+serialization off it. So there are two passes:
+
+- **before** the recording starts, synchronously on the OpMode init path, so the
+  recording about to begin has room. That is not the publish path, and listing a
+  few dozen files is not a stall;
+- **after** the recording ends, dispatched to a daemon thread by
+  `RetentionSweeper`, so `close()` never waits on the filesystem.
+
+### Degrading, not failing
+
+A file that will not delete is recorded in `PruneResult#failures()` and the pass
+**stops**. It does not carry on to the next candidate, because the candidates are
+ordered oldest-first: deleting a newer recording to work around an older one that
+will not go keeps the wrong file and loses the right one. A refused delete also
+usually means the whole directory is read-only, where the next delete would fail
+too.
+
+Nothing in the policy throws. A removal that throws anyway is contained by the
+sweeper on the background path and by `EngramSession` on the init path, because
+housekeeping is never a reason to abort a match.
+
+---
+
+## Capture completeness
+
+`CaptureReport` answers "can I trust this file?" from the facts the format
+actually records. The format stores one thing the recorder *saw*, not one thing
+that *happened*, and every check is built on that distinction.
+
+| Finding | Derived from |
+|---------|--------------|
+| `unfinalized` | No `LIFECYCLE_STOP`, which is written immediately before the stream closes. Its absence means the process was killed, crashed, or lost power — **the strongest signal the format has.** |
+| `truncated` | The parser consumed a length prefix it could not satisfy. |
+| `declared-never-published` | A declaration with no publishes. The recorder queues a declaration immediately before the publish that triggers it, so this pairing means the stream stopped between them. |
+| `undeclared-topic` | A publish whose topic id has no declaration. This needs `TopicInfo#isDeclared()`, because the reader otherwise synthesises a `topic-N` manifest entry and the damage looks like an ordinary topic. |
+| `missing-init`, `no-topics` | Structural holes that no recorder-written file has. |
+| `missing-expected-topic` | A caller-supplied expectation. |
+
+### What it cannot support
+
+**A topic the capture path never saw is invisible.** Nothing in the file records
+which topics should exist, so a `bulkRead` topic that was never observed is
+indistinguishable from a robot with no sensors. No amount of reader work changes
+that; it is a property of the format. The only defence is to state the
+expectation from outside, which is why `CaptureReport.of(recording, expected)` and
+`engram inspect --expect-topic` exist.
+
+That limitation is the reason the report takes a caller-supplied input at all,
+and why its Javadoc names it rather than leaving a reader to discover it by
+having been fooled.
+
+### Exit codes
+
+`inspect` exits `0` for an incomplete recording by default — a crashed run is
+data to be read, not an error to be refused, and a nonzero default would break
+every script that inspects a file after a bad match. `--strict` exits `3`
+instead, which is the whole of the scriptable contract.
+
+---
+
 ## Replay
 
 `EngramRecordingReader` parses a file into an immutable `EngramRecording`, which
@@ -188,12 +288,14 @@ engram/
 │   ├── DecoratorCapture             # decorator fallback
 │   ├── RecordingOrchestrator        # the decorator
 │   ├── OutputLocation               # writable path on the RC
+│   ├── RetentionPolicy / Sweeper / PruneResult
 │   ├── RecorderConfig / Stats / Log
 │   └── annotation/Recorded
 │
 ├── engram-replay/                   # desktop side
 │   ├── EngramRecordingReader        # parse (+ gzip, truncation)
 │   ├── EngramRecording              # query API
+│   ├── CaptureReport                # completeness verdict
 │   ├── TopicInfo / Sample / TopicStats
 │   ├── Values                       # decoding
 │   ├── export/                      # JSON, NDJSON, CSV
@@ -219,7 +321,7 @@ plain desktop JVM.
 
 ## Testing
 
-226 tests. The structure is deliberate:
+275 tests, plus an opt-in soak. The structure is deliberate:
 
 - **`ProtoFramingTest`** pins the hand-rolled length-delimited framing against
   protobuf's own encoder, across every varint width boundary. The recorder
@@ -251,6 +353,38 @@ plain desktop JVM.
 - **`engram-replay`'s tests** construct protobuf messages directly and never use
   the recorder, because `engram-replay` does not depend on it. That way a
   matching mistake in the writer and the reader cannot cancel out.
+- **`RetentionPolicyTest`** covers selection, the floor, the live recording,
+  non-recording files, and the delete-refused path. The refusal case uses a
+  package-private seam rather than a read-only directory, because a filesystem
+  fixture that behaves differently when the suite runs as root is exactly the
+  kind of test that only fails in someone else's CI.
+- **`CaptureReportTest`** covers healthy, unfinalized, truncated,
+  declared-but-never-published, undeclared, and expectation-missing recordings —
+  including one test that pins the *absence* of a finding, so the known blind
+  spot cannot be quietly forgotten.
+
+### The soak
+
+`MatchLengthSoakTest` is tagged `soak`, excluded from `test`, and run by
+`./gradlew soakTest`. It drives a 150-second run at roughly 1,150 publishes per
+second from four threads shaped like an OpMode loop, a control node, a
+`bulkRead` callback, and a telemetry thread. It exists because two of this
+project's non-negotiables — "never blocks the publishing thread" and "never
+allocates without bound" — were otherwise only argued in prose.
+
+It separates what it **asserts** from what it **reports**, deliberately:
+
+- strict: no exception escaped into a publisher, nothing was dropped, the writer
+  never latched a failure, queue depth stayed bounded, retained heap did not
+  grow, and the file reads back complete;
+- loose: p99 publish latency against a budget four orders of magnitude above
+  the encoder's real cost, because a shared runner can stall a thread for
+  milliseconds without Engram being at fault;
+- informational: p50/p99/p99.9/max latency, heap growth, file size, event
+  count.
+
+Latencies go into a fixed-bucket histogram rather than an array, because
+retaining a million longs would have the soak measuring its own allocation.
 
 ---
 
@@ -266,6 +400,13 @@ plain desktop JVM.
 
 Measured on the demo fixture: 781 publishes across 4 topics in 2 s produced a
 14 KB file, 7 KB gzipped, with a 36 KB recorder jar.
+
+The `soakTest` task produces the numbers above the README's design commitments
+for a real match: latency percentiles per publish, queue depth, and heap growth,
+at about 1,150 publishes per second. Treat its latency figures as a measurement
+of *this* machine rather than a specification of the robot — a Control Hub is a
+different CPU with a different allocator — and treat its correctness assertions
+as the part that should hold anywhere.
 
 The strategy selector is tested in both directions, which matters because
 selection has to key off the orchestrator's actual capability rather than the

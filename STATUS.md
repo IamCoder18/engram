@@ -9,7 +9,7 @@
 
 | Workstream | State |
 |---|---|
-| Engram implementation | **Done.** 226 tests, 0 failures. |
+| Engram implementation | **Done.** 275 tests, 0 failures. Three features added on top, **uncommitted and unpublished** — see "Unreleased work in the working tree". |
 | Engram verification vs real FTC SDK | **Done.** 2 real defects found and fixed. |
 | Engram published to Maven Central + GitHub Packages | **Done.** All 3 modules live and resolving. |
 | Engram CI | `main` **green**, but tagged commit `9172964` carries a **permanently red `Publish` check** (run `36578027259`, 409 version collision). Release is good; the red X is real. See below. |
@@ -30,13 +30,13 @@ Three modules, 3,850 lines main / 3,672 lines test.
 | `engram-recorder` | Robot-side capture, 36 KB jar | `engram-proto`, Synapse *(api)* |
 | `engram-replay` | Desktop reader, query API, exporters, CLI | `engram-proto` only |
 
-226 tests, 0 failures, 0 skipped. Clean build, no compiler warnings.
+275 tests, 0 failures, 0 skipped. Clean build, no compiler warnings.
 
 Design decisions worth knowing:
 - Topic declarations travel **inline** in the event stream, not in the file header. A header is written before any event exists, so it cannot describe a topic first seen later. Inline declarations keep the writer streaming and crash-safe.
 - Capture is reached **reflectively**, so one build works against Synapse versions on both sides of the `PublishListener` hook existing and switches strategy automatically.
 - The recorder has **no FTC SDK dependency**, which is what makes it testable on a desktop JVM.
-- Recording never throws into `publish`, never blocks a publishing thread on I/O, never allocates unboundedly.
+- Recording never throws into `publish`, never blocks a publishing thread on I/O, never allocates unboundedly. **Now measured, not just argued** — see the soak below.
 
 ### 2. Verification against the real FTC SDK
 
@@ -64,6 +64,20 @@ Pulled `RobotCore-10.2.0.aar` and ran `javap` rather than assuming. This found *
 Migrated `GPG_PRIVATE_KEY`, `GPG_PASSPHRASE`, `SONATYPE_PASSWORD` from the synapse repo to engram. `SONATYPE_USERNAME` was **empty** in synapse and was supplied manually.
 
 Cleanup verified complete: temporary export workflow deleted, both runs deleted (their logs held the secrets), all local copies of the key/token deleted, and no secret material is in either repo.
+
+---
+
+## Unreleased work in the working tree
+
+**Nothing is committed, tagged, or published.** The live `0.1.0` artifacts are unaffected. Three features, 49 new tests (226 → 275).
+
+| Feature | State | Notes |
+|---|---|---|
+| Match-length soak test | **Done, run twice** | `./gradlew soakTest`, tag `soak`, excluded from `test`. Two full 150 s runs measured p50 0.45–0.48 µs, p99 14.3–15.4 µs, max 9–23 ms, queue depth ≤ 156, heap growth 5.7–6.5 MB, at 172,500 publishes (1,150/s). Correctness asserted strictly; the p99 budget is deliberately loose. |
+| Recording retention / pruning | **Done** | `RetentionPolicy` via `RecorderConfig` and `@Recorded`. Off by default. Bounded by total bytes and/or count, with a floor; never deletes the live recording; runs off the publish path. |
+| Capture completeness in `engram inspect` | **Done** | New `Capture` section, `--expect-topic`, `--strict` (exit 3), and a `capture` block in JSON export. |
+
+**What the format still cannot do**, and this is the important caveat on the third item: a topic the capture path never saw at all is invisible. Nothing in a recording records which topics *should* exist, so the `bulkRead` gap is only detectable if the caller supplies `--expect-topic`. Closing it properly needs a format change — a manifest of intended topics written before the run — which is additive but is a wire-format decision, not a tool change.
 
 ---
 
@@ -157,11 +171,11 @@ This is unresolved. Until it is, the local synapse tree is **not** in a state wo
 
 | Gap | Impact | Status |
 |---|---|---|
-| `bulkRead` sensor publishes missing on Synapse 0.4.0 | **Silent** — no error, no warning, just absent data | Workaround shipped (`engram.recording(...)`); PR #27 would remove it |
+| `bulkRead` sensor publishes missing on Synapse 0.4.0 | **Silent** — no error, no warning, just absent data | Workaround shipped (`engram.recording(...)`); PR #27 would remove it. `inspect --expect-topic` now makes the *absence* detectable if you name the topic, but the file itself still cannot see it. |
 | Never run on a real Robot Controller | The single largest unverified assumption | Needs 15 min on a Control Center: check `strategyName()`, `location().describe()`, `location().isUsbVisible()`, `stats().isHealthy()` |
-| No match-length soak test | 150 s at realistic rates unmeasured | Not started |
-| No recording retention/pruning | A season of practice fills the RC's storage | Not started |
-| `engram inspect` does not report capture completeness | A silently incomplete recording looks fine | Not started |
+| No match-length soak test | 150 s at realistic rates unmeasured | **Done.** See "Unreleased work in the working tree". |
+| No recording retention/pruning | A season of practice fills the RC's storage | **Done.** Opt-in, off by default. |
+| `engram inspect` does not report capture completeness | A silently incomplete recording looks fine | **Done**, except for a topic that was never captured — that needs a caller-supplied expectation, and a format change to do properly. |
 
 ---
 

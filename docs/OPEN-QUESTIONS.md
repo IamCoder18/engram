@@ -53,7 +53,25 @@ cross-file identity, so correlating an autonomous recording with a teleop one
 means matching on topic *name*. Fine for the current use; a shared id space
 would be needed for a cross-run index.
 
-### 5. The whole recording is held in memory when read
+### 5. A topic the capture path never saw cannot be detected from the file
+
+Nothing in a recording records which topics *should* have existed. A `bulkRead`
+topic that was never observed (see limitation 1) leaves no declaration, no
+publish, and no counter — a file that is perfectly well formed and perfectly
+incomplete.
+
+**What Engram does:** `engram inspect` reports everything the format genuinely
+supports (`unfinalized`, `truncated`, `declared-never-published`,
+`undeclared-topic`, `missing-init`, `no-topics`) and takes caller-supplied
+expectations through `--expect-topic`, so a missing topic is reported when the
+caller says it should be there.
+
+**What it cannot do:** infer the expectation. Closing this properly needs a
+format change — a manifest of topics the OpMode *intended* to publish, written
+before the run — which is additive and therefore compatible, but is a wire-format
+decision rather than a tool change. Unimplemented.
+
+### 6. The whole recording is held in memory when read
 
 A few megabytes for a full match, which is nothing on a desktop. A 30-minute
 autonomous test session would be a few hundred megabytes. Streaming queries
@@ -73,9 +91,11 @@ CaptureStrategies.isPublishListenerAvailable();
 engram.isSensorCaptureAutomatic();
 ```
 
-The CLI could surface this too — `engram inspect` could report whether sensor
-publishes are complete. **Worth adding**, since a silently incomplete recording
-is the worst failure mode here.
+Partly answered from the file now: `engram inspect` reports whether a recording
+is complete, and `--expect-topic` catches the topics the decorator strategy
+cannot see on Synapse 0.4.0. What it still cannot report is *why* a topic is
+absent, because the file does not record what was meant to be published — see
+limitation 5.
 
 ### Should `@Recorded` exist at all?
 
@@ -96,16 +116,26 @@ arguably useful — **unimplemented**.
 
 ### Retaining old recordings
 
-A season of practice sessions will fill the RC's storage. `OutputLocation` does
-not prune. A cap on the newest N files, or a size budget, would be a sensible
-addition. **Unimplemented.**
+**Implemented.** `RetentionPolicy` bounds the output directory by maximum total
+bytes and maximum recording count, keeps a floor of recordings, never deletes
+the one being written, and runs off the publishing path. Off by default; see
+[USAGE.md](USAGE.md#keeping-the-directory-under-control).
+
+Open question it did not settle: a **maximum age** was considered and rejected,
+because `File.lastModified()` on the RC's FAT32 card is the only clock available
+and a wall-clock policy is the one most likely to delete the recording from
+today's practice. If teams ask for "delete anything older than a week", the
+format's own `startEpochMs` in the header would be a better clock than the
+filesystem, and that means reading each candidate's header — cheap for a few
+dozen files, and the thing to add first.
 
 ### Web visualizer data path
 
 Deferred until the visualizer is built. JSON export already produces the right
-shape. The alternative is serving protobuf directly via `protobuf.js`, which
-avoids a conversion step but adds browser-side tooling. JSON is the safe default
-in the meantime.
+shape, and now carries a `capture` block with the completeness verdict so the
+front end does not have to reimplement it. The alternative is serving protobuf
+directly via `protobuf.js`, which avoids a conversion step but adds browser-side
+tooling. JSON is the safe default in the meantime.
 
 ### Sampling and volume control
 

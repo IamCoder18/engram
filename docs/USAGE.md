@@ -7,8 +7,10 @@ How to record a run and read it back.
 - [Recording a run](#recording-a-run)
 - [Sensor publishes on Synapse 0.4.0](#sensor-publishes-on-synapse-040)
 - [Where recordings go](#where-recordings-go)
+- [Keeping the directory under control](#keeping-the-directory-under-control)
 - [Custom value types](#custom-value-types)
 - [Reading a recording](#reading-a-recording)
+- [Checking a recording is complete](#checking-a-recording-is-complete)
 - [Command line](#command-line)
 - [Exporting for other tools](#exporting-for-other-tools)
 - [Compressing a recording](#compressing-a-recording)
@@ -192,6 +194,73 @@ desktop-only and accepts either a `File` or a `Path`.
 
 ---
 
+## Keeping the directory under control
+
+A season of practice fills the Robot Controller's storage. Engram will not
+delete anything unless you configure a `RetentionPolicy` — a recorder that
+quietly removes files from a robot someone paid to build is a worse surprise
+than a full SD card.
+
+```java
+import com.aaravlabs.engram.recorder.RetentionPolicy;
+
+EngramSession session = EngramSession.start(this, orchestrator,
+        RecorderConfig.builder()
+                // 0 for either limit means "no limit of that kind"
+                .withRetention(RetentionPolicy.of(256L * 1024 * 1024, 20))
+                .withLog(RecorderLog.stderr())
+                .build());
+```
+
+Or, declaratively:
+
+```java
+@Recorded(retentionMaxBytes = 256L * 1024 * 1024, retentionMaxRecordings = 20)
+public class MyTeleOp extends SafeOpMode { ... }
+```
+
+`RetentionPolicy.of(maxTotalBytes, maxRecordings[, minRetained])` prunes the
+oldest `.engram` / `.engram.gz` files until both limits hold:
+
+| Limit | Why |
+|-------|-----|
+| **max total bytes** | Storage is the real constraint: a 32 GB card shared with the RC app and match logs. |
+| **max recording count** | Stops a season of very small recordings from accumulating into a directory listing that takes a while to scan. |
+
+There is deliberately **no maximum age**. `File.lastModified()` is the only
+timestamp available, its resolution depends on the FAT32 card, and a wall-clock
+policy is the one most likely to delete this morning's practice on the morning
+of a competition.
+
+**What it will never delete:**
+
+- the recording currently being written. Pruning skips it explicitly, so a pass
+  cannot truncate a live recording;
+- anything below `minRetained` (default `1`). An over-tight size limit degrades
+  into "kept more than you asked for", not "the robot has no recordings";
+- anything that is not a recording — a `.engram.tmp`, a notes file, a
+  directory.
+
+**When it runs.** Once before the recording starts, so the new one has room,
+and once on a background thread after `close()`, so the directory does not grow
+without bound across a season. Neither pass is on the publishing path.
+
+**When it cannot finish.** A file that will not delete is reported through
+`engram.lastPruneResult()` and in the log, and the pass stops rather than
+deleting a *newer* recording to work around an *older* one that will not go —
+which is also the likely outcome, since a refused delete usually means the whole
+directory is read-only. Nothing throws, and a prune failure never reaches a
+publish or a match.
+
+```java
+PruneResult result = engram.lastPruneResult();
+if (result != null && !result.isClean()) {
+    telemetry.addLine("engram: could not prune " + result.failures());
+}
+```
+
+---
+
 ## Custom value types
 
 Engram encodes the boxed primitives, `String`, `Character`, `Enum`,
@@ -278,12 +347,85 @@ empty, so a typo is not mistaken for "nothing was recorded".
 
 ---
 
+## Checking a recording is complete
+
+A recording that silently lost data looks exactly like one that captured
+everything. That is exactly how the `bulkRead` sensor gap hid. `inspect` now
+reports completeness:
+
+```
+Capture      COMPLETE
+Finalized    yes
+Declared     4 topics, 4 observed with publishes
+             every declared topic has publishes and the run closed cleanly
+```
+
+or, for a robot that was killed mid-match:
+
+```
+Capture      INCOMPLETE
+Finalized    no
+Declared     4 topics, 4 observed with publishes
+             unfinalized: no LIFECYCLE_STOP: the run was killed, crashed, or lost
+             power before it closed
+```
+### What counts as incomplete
+
+| Code | Means |
+|------|-------|
+| `unfinalized` | No `LIFECYCLE_STOP`. The recorder writes it immediately before closing the stream, so its absence means the process was killed, crashed, or lost power mid-run. **The strongest signal the format has.** |
+| `truncated` | The file ends mid-message, so the tail of the run is gone. |
+| `declared-never-published` | A topic's declaration was written but its first publish was not. The recorder queues a declaration immediately before the publish that triggers it, so the only way to see one is a stream that stopped between the two. |
+| `undeclared-topic` | Publishes referencing a topic id whose declaration never arrived. The recorder never produces this; a file that does is damaged. |
+| `missing-init` | No `LIFECYCLE_INIT`, so there is no time origin. |
+| `no-topics` | Nothing was ever declared. |
+| `missing-expected-topic` | A topic you named with `--expect-topic` is not in the file. |
+
+### What it cannot detect, and why
+
+**A topic the capture path never saw at all is invisible.** Nothing in the file
+records which topics *should* exist, so a `bulkRead` topic that was never
+observed is indistinguishable from a robot with no sensors. This is a property
+of the wire format, not of the report.
+
+The defence is to say what you expect:
+
+```bash
+engram inspect match.engram \
+    --expect-topic drive/power \
+    --expect-topic sensor/odom-left \
+    --expect-topic sensor/odom-right \
+    --strict
+```
+
+`--strict` exits `3` when the recording is incomplete, so a CI job or a shell
+loop can act on it without parsing prose. Without `--strict`, `inspect` still
+exits `0` — a crashed recording is data to be read, not an error to be refused.
+
+From Java:
+
+```java
+CaptureReport report = recording.captureReport(Arrays.asList("sensor/odom-left"));
+if (!report.isComplete()) {
+    for (CaptureReport.Finding f : report.findings()) {
+        System.out.println(f.code() + " " + f.topics());
+    }
+}
+```
+
+`engram export --format json` carries the same verdict in a `capture` object, so
+a web visualizer does not have to reimplement any of it.
+
+---
+
 ## Command line
 
 ```bash
 JAR=engram-replay/build/libs/engram-replay-*-all.jar
 
-engram inspect match.engram                    # summary, topics, rates, ranges
+engram inspect match.engram                    # summary, completeness, topics, rates
+engram inspect match.engram --strict           # exit 3 if anything is missing
+engram inspect match.engram --expect-topic sensor/odom-left
 engram topics  match.engram                    # every topic with its type
 engram query   match.engram --topic drive/power
 engram query   match.engram --topic drive/power --from 0 --to 5000000
@@ -296,7 +438,8 @@ Times are microseconds since the recording started. `play` streams a topic to
 stdout at real-time speed (or faster with `--speed`), which is useful for
 eyeballing a run alongside a video.
 
-Exit codes: `0` success, `1` unreadable file, `2` bad usage.
+Exit codes: `0` success, `1` unreadable file, `2` bad usage, `3` — from
+`inspect --strict` only — the file was read but the recording is incomplete.
 
 ---
 
@@ -312,6 +455,7 @@ visualizer should consume:
   "startEpochMs": 1759062000000,
   "initTimeUs": 0, "startTimeUs": 150000, "stopTimeUs": 5010000,
   "truncated": false,
+  "capture": { "complete": true, "finalized": true, "declaredTopics": 1, "observedTopics": 1, "problems": [] },
   "topics":  [ { "id": 0, "name": "drive/power", "javaType": "java.lang.Double", "valueType": "VALUE_TYPE_DOUBLE", "publishes": 1800, "unrecorded": 0 } ],
   "samples": [ { "t": 0, "topicId": 0, "topic": "drive/power", "value": 0.0 } ]
 }

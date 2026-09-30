@@ -55,6 +55,10 @@ public final class EngramSession implements AutoCloseable {
     private final Orchestrator effectiveOrchestrator;
     private final OutputLocation location;
     private final RecorderConfig config;
+    private final java.util.concurrent.atomic.AtomicReference<PruneResult> lastPrune =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    private final java.util.concurrent.atomic.AtomicLong prunePasses =
+            new java.util.concurrent.atomic.AtomicLong();
 
     private volatile boolean closed;
 
@@ -62,12 +66,20 @@ public final class EngramSession implements AutoCloseable {
                           CaptureStrategy strategy,
                           Orchestrator effectiveOrchestrator,
                           OutputLocation location,
-                          RecorderConfig config) {
+                          RecorderConfig config,
+                          PruneResult initialPrune) {
         this.recorder = recorder;
         this.strategy = strategy;
         this.effectiveOrchestrator = effectiveOrchestrator;
         this.location = location;
         this.config = config;
+        this.lastPrune.set(initialPrune);
+        // The pass that ran before recording started counts as one: it is a pass
+        // this session saw the results of, and a caller comparing counts across
+        // close() must not be surprised by it.
+        if (initialPrune != null) {
+            this.prunePasses.set(1L);
+        }
     }
 
     /**
@@ -88,6 +100,7 @@ public final class EngramSession implements AutoCloseable {
                 : RecorderConfig.builder()
                         .withFlushIntervalMs(annotation.flushIntervalMs())
                         .withMaxEventsPerFlush(annotation.maxEventsPerFlush())
+                        .withRetention(retentionFrom(annotation))
                         .withLog(RecorderLog.stderr())
                         .build();
         String label = annotation != null && !annotation.label().isEmpty()
@@ -97,6 +110,20 @@ public final class EngramSession implements AutoCloseable {
 
         OutputLocation location = OutputLocation.resolve(opModeContext);
         return start(label, location.newFile(label), orchestrator, config, forced);
+    }
+
+    /**
+     * Builds the retention policy an annotation asks for.
+     *
+     * <p>Both limits default to zero, which is {@link RetentionPolicy#disabled()},
+     * so an annotation that says nothing about retention prunes nothing.
+     */
+    private static RetentionPolicy retentionFrom(Recorded annotation) {
+        if (annotation == null) {
+            return RetentionPolicy.disabled();
+        }
+        return RetentionPolicy.of(annotation.retentionMaxBytes(), annotation.retentionMaxRecordings(),
+                annotation.retentionMinRetained());
     }
 
     /**
@@ -129,6 +156,15 @@ public final class EngramSession implements AutoCloseable {
         if (orchestrator == null) throw new IllegalArgumentException("orchestrator must not be null");
 
         RecorderConfig effectiveConfig = config == null ? RecorderConfig.defaults() : config;
+        File parent = file.getAbsoluteFile().getParentFile();
+
+        // Retention runs before the file is opened, so the recording that is
+        // about to start has room. This is on the OpMode init path, not the
+        // publish path, and the whole pass is a directory listing plus a few
+        // unlinks -- but a failure here must not stop the run, so it is
+        // swallowed.
+        PruneResult initialPrune = pruneBeforeRecording(effectiveConfig, parent);
+
         Recorder recorder = Recorder.open(file, label, effectiveConfig);
         CaptureStrategy strategy;
         try {
@@ -137,10 +173,35 @@ public final class EngramSession implements AutoCloseable {
             recorder.close();
             throw e;
         }
-        File parent = file.getAbsoluteFile().getParentFile();
         return new EngramSession(recorder, strategy, strategy.orchestrator(),
                 parent == null ? OutputLocation.of(new File(".")) : OutputLocation.of(parent),
-                effectiveConfig);
+                effectiveConfig, initialPrune);
+    }
+
+    /**
+     * Frees space before a recording starts, on the init path.
+     *
+     * <p>Nothing is in progress yet, so there is no file to protect. Every
+     * failure is contained: pruning is housekeeping and the recording matters
+     * more.
+     *
+     * @return what the pass did, or null if none ran
+     */
+    private static PruneResult pruneBeforeRecording(RecorderConfig config, File directory) {
+        RetentionPolicy policy = config.retention();
+        if (!policy.isEnabled() || directory == null) {
+            return null;
+        }
+        try {
+            PruneResult result = policy.prune(directory, null);
+            if (result.deleted() > 0 || !result.isClean()) {
+                config.log().warn(result.toString());
+            }
+            return result;
+        } catch (Throwable t) {
+            config.log().warn("retention pass before recording failed: " + t);
+            return null;
+        }
     }
 
     /**
@@ -175,6 +236,38 @@ public final class EngramSession implements AutoCloseable {
     /** The directory the recording was placed in. */
     public OutputLocation location() {
         return location;
+    }
+
+    /**
+     * The most recent {@link RetentionPolicy} pass, or null if none has run
+     * yet.
+     *
+     * <p>The pass after {@link #close()} is asynchronous, so a telemetry line
+     * that reads this immediately after closing may still see the previous
+     * result. Null simply means no pass has completed.
+     */
+    public PruneResult lastPruneResult() {
+        return lastPrune.get();
+    }
+
+    /**
+     * How many {@link RetentionPolicy} passes this session has seen complete,
+     * counting the one that ran before recording started.
+     *
+     * <p>{@link #lastPruneResult()} alone cannot distinguish "no pass has
+     * finished yet" from "the pass I was waiting for already finished and
+     * {@code this} is its result", because the pass after {@link #close()} is
+     * dispatched before {@code close()} returns and frequently finishes first.
+     * A counter moves strictly forward, so a caller can read it before closing,
+     * then wait for it to pass that reading and know that whatever
+     * {@link #lastPruneResult()} returns is from a later pass. Equal-valued
+     * passes count as two, which is the point: a pass that legitimately deleted
+     * nothing is still a pass that ran.
+     *
+     * @return the number of completed passes; 0 if none has
+     */
+    public long completedPrunePasses() {
+        return prunePasses.get();
     }
 
     /** Which capture strategy is in effect: {@code "publish-listener"} or {@code "decorator"}. */
@@ -230,6 +323,14 @@ public final class EngramSession implements AutoCloseable {
      * <p>Idempotent, and safe to call from {@code onSafeStop()}: the
      * {@code LIFECYCLE_STOP} event is written before the stream is closed, and
      * an I/O failure is reported by {@link #stats()} rather than thrown.
+     *
+     * <p>If retention is configured, a prune pass is dispatched to a background
+     * thread once the file is closed, so the directory does not grow without
+     * bound across a season. It does not delay {@code close()} and cannot
+     * affect the recording. The pass is queued rather than dropped: a pass
+     * requested while another is running runs after it, because a suppressed
+     * pass is a directory that stays over its limit with nothing scheduled to
+     * come back for it.
      */
     @Override
     public void close() {
@@ -241,6 +342,17 @@ public final class EngramSession implements AutoCloseable {
             strategy.detach();
         } finally {
             recorder.close();
+            RetentionSweeper.shared().submit(config.retention(), location.directory(),
+                    recorder.file(), config.log(), new java.util.function.Consumer<PruneResult>() {
+                        @Override
+                        public void accept(PruneResult result) {
+                            // Result first, count second: a reader that sees
+                            // the new count must also see the result it belongs
+                            // to.
+                            lastPrune.set(result);
+                            prunePasses.incrementAndGet();
+                        }
+                    });
         }
     }
 

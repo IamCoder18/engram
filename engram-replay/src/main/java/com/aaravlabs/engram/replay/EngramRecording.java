@@ -155,6 +155,29 @@ public final class EngramRecording {
         return truncationReason;
     }
 
+    /**
+     * Whether this recording is actually complete, with no expectations about
+     * which topics should exist.
+     *
+     * @see CaptureReport
+     */
+    public CaptureReport captureReport() {
+        return CaptureReport.of(this);
+    }
+
+    /**
+     * Whether this recording is complete, additionally checking that every named
+     * topic is present.
+     *
+     * <p>The file cannot say which topics it was supposed to contain, so this is
+     * the only way to catch one that was never captured at all.
+     *
+     * @throws IllegalArgumentException if {@code expectedTopicNames} is null
+     */
+    public CaptureReport captureReport(List<String> expectedTopicNames) {
+        return CaptureReport.of(this, expectedTopicNames);
+    }
+
     /** Total events read, including lifecycle events and topic declarations. */
     public int eventCount() {
         return events.size();

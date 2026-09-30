@@ -198,7 +198,8 @@ public final class EngramRecordingReader {
                     }
                 }
             }
-            topics.add(new TopicInfo(id, name, javaType, valueType, count, first, last, unrecorded));
+            topics.add(new TopicInfo(id, name, javaType, valueType, count, first, last, unrecorded,
+                    d != null));
         }
 
         return new EngramRecording(header, events, topics, seriesById,
