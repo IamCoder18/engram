@@ -13,6 +13,7 @@
 | Engram verification vs real FTC SDK | **Done.** 2 real defects found and fixed. |
 | Engram published to Maven Central + GitHub Packages | **Done.** All 3 modules live and resolving. |
 | Engram CI | **Green** (build + publish). |
+| Synapse `main` CI | **RED.** `Docker image` has failed on every push to `main` since 2026-09-13. Pre-existing, **not** caused by this work. See below. |
 | Synapse PR #27 (`PublishListener`) | **Open. One real bug fixed locally but NOT yet pushed, and a new regression test is failing un-diagnosed. Do not merge.** |
 
 ---
@@ -65,6 +66,34 @@ Cleanup verified complete: temporary export workflow deleted, both runs deleted 
 
 ---
 
+## Synapse `main` CI is RED (pre-existing, unrelated to Engram)
+
+**This is a real, currently-failing workflow. It is not part of the Engram deliverable, and it is not caused by anything in this repo's history of work.**
+
+- Workflow: `Docker image` (`.github/workflows/docker.yml`), job `Merge manifests & push tags`, step `Create multi-arch manifest list and push`.
+- Error, verbatim:
+  ```
+  ERROR: failed to parse source "@sha256:e1f994b5...", valid sources are digests,
+  references and descriptors: invalid reference format
+  ```
+- **Root cause: a bug in the workflow YAML.** The `merge` job reads `IMAGE: ${{ env.IMAGE }}`, but `IMAGE` is only ever exported by a `Prepare image name` step that exists in the `build-amd64` and `build-arm64` jobs — **not** in `merge`. So `env.IMAGE` is empty and the source string expands to a bare `@sha256:...`.
+- Introduced by commit `ea5f0a3a` ("ci(docker): lowercase registry image name", 2026-09-13). That commit correctly fixed a mixed-case image name in the two build jobs, but the same diff mechanically rewrote the `merge` job's `IMAGE:` lines to the variable that job never sets. It has failed on **every** push to `main` since. Last success: run `34765339776` (2026-09-13T15:21Z).
+- **Not environmental.** No rate limit, no registry auth, no network. It is a pure expression-evaluation failure, so it fails deterministically on every push and on `v*` tags.
+- Why it went unnoticed: `docker/metadata-action` still emits correct tags via its GitHub-context fallback, so the tag list looks right and only the manifest step breaks.
+- **PRs are unaffected.** PR #27 runs `Docker image (PR)` (`docker-pr.yml`), which has only the two build jobs and no merge/manifest step — it cannot hit this bug. That is why PR #27 is green while `main` is red.
+- **Recommended fix (identified, deliberately NOT applied):** add the same `Prepare image name` step to the `merge` job:
+  ```yaml
+  - name: Prepare image name
+    env:
+      SOURCE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+    run: echo "IMAGE=${SOURCE,,}" >> "$GITHUB_ENV"
+  ```
+  Left unapplied because it is outside the scope of the Engram work and modifies a repo I was asked not to merge into.
+
+**Not yet checked:** whether `publish.yml` or the compose files reference the image name the same way and are therefore also affected.
+
+---
+
 ## In progress — Synapse PR #27
 
 **https://github.com/IamCoder18/synapse/pull/27** · `feature/publish-listener` · base `main` · **OPEN, CI green (Build & Test pass, both images build), 1 commit `fc9274c`**
@@ -86,7 +115,7 @@ Also fixed locally: `markdownlint` MD022 (blank line after `### Added` in CHANGE
 
 ### The problem right now
 
-I re-cloned to `/tmp/syn` (`/tmp/synapse-pr` was wiped between sessions) and re-applied all four fixes. Then I added a regression test for finding #1:
+I re-cloned to `~/agent-artifacts/tmp/syn` and re-applied all four fixes. Then I added a regression test for finding #1:
 
 ```
 PublishListenerTest > listenersCanBeAddedAndRemovedWhilePublishing() FAILED
@@ -142,8 +171,8 @@ This is unresolved. Until it is, the local synapse tree is **not** in a state wo
 cd /home/aarav/apps/engram
 ./gradlew build :engram-replay:fatJar
 
-# synapse PR branch
-cd /tmp/syn
+# synapse PR branch  (NOT /tmp — /tmp is a tmpfs that was wiped once already)
+cd ~/agent-artifacts/tmp/syn
 /home/aarav/.gradle/wrapper/dists/gradle-9.4.1-bin/arn2x92ynaizyzdaamcbpbhtj/gradle-9.4.1/bin/gradle clean test
 
 # confirm publication
@@ -155,11 +184,29 @@ done
 
 ---
 
+## Recovery / backup
+
+The uncommitted PR #27 fixes are backed up independently of the worktree, so a filesystem wipe can no longer lose them:
+
+- `~/agent-artifacts/pr27-backup/uncommitted.patch` — 154-line diff of all 4 modified files
+- `~/agent-artifacts/pr27-backup/status.txt` — modified-file list
+- `~/agent-artifacts/pr27-backup/HEAD.txt` — base commit `fc9274c`
+
+Restore with `git apply ~/agent-artifacts/pr27-backup/uncommitted.patch` on `feature/publish-listener` at `fc9274c`.
+
+Note: `/tmp` is a 7.5G tmpfs and briefly hit its quota during this work; the synapse `build/` directory alone was 5.9G of regenerable output. Build artifacts do **not** need preserving.
+
+---
+
 ## Note on CI runs
 
-The engram publish history contains two failures that are both **superseded and expected** — do not treat them as current breakage:
+### Engram — the two failures are superseded, not current breakage
 
 - `36577469545` — failed: root project had no `repositories`, so NMCP's check task could not resolve `nmcp-tasks`. Failed *before* any upload. Fixed in `9172964`.
 - `36578027259` — failed: HTTP 409 on GitHub Packages, because the *earlier* run had already published `0.1.0` and GitHub Packages does not allow overwriting a version. Packages were deleted, and `36578312902` then succeeded on the same SHA.
 
-`36578312902` (Publish) and `36578024445` (build) are both **success** on `9172964`, which is the tagged commit.
+`36578312902` (Publish) and `36578024445` (build) are both **success** on `9172964`, which is the tagged commit. All three artifacts independently re-verified as **HTTP 200** on Maven Central.
+
+### Synapse — the red runs are NOT superseded
+
+Unlike engram, the Synapse `Docker image` failures are **current, ongoing, and unfixed**. Do not read the engram note above as covering them. See "Synapse `main` CI is RED" above.
