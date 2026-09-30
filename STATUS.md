@@ -12,7 +12,7 @@
 | Engram implementation | **Done.** 226 tests, 0 failures. |
 | Engram verification vs real FTC SDK | **Done.** 2 real defects found and fixed. |
 | Engram published to Maven Central + GitHub Packages | **Done.** All 3 modules live and resolving. |
-| Engram CI | **Green** (build + publish). |
+| Engram CI | `main` **green**, but tagged commit `9172964` carries a **permanently red `Publish` check** (run `36578027259`, 409 version collision). Release is good; the red X is real. See below. |
 | Synapse `main` CI | **RED.** `Docker image` has failed on every push to `main` since 2026-09-13. Pre-existing, **not** caused by this work. See below. |
 | Synapse PR #27 (`PublishListener`) | **Open. One real bug fixed locally but NOT yet pushed, and a new regression test is failing un-diagnosed. Do not merge.** |
 
@@ -57,6 +57,7 @@ Pulled `RobotCore-10.2.0.aar` and ran `javap` rather than assuming. This found *
   - GitHub Packages: `com.aaravlabs.engram-{proto,recorder,replay}` all present
 - Signed with the migrated GPG key (RSA 3072, fingerprint `6E69CC5CF456835401AFAD7F868A012195E3876E`, "IamCoder18 (Synapse release signing key)"). Locally verified 15/15 artifacts sign and verify as Good before spending a CI run.
 - Publish workflow gates the upload behind a full test run.
+- **Caveat:** the `v0.1.0` tag is force-moved across two commits, and one superseded run of the tagged commit is permanently red. Artifacts are good; see "Note on CI runs" for the full correction.
 
 ### 4. Credential migration (done and cleaned up)
 
@@ -200,13 +201,64 @@ Note: `/tmp` is a 7.5G tmpfs and briefly hit its quota during this work; the syn
 
 ## Note on CI runs
 
-### Engram — the two failures are superseded, not current breakage
+### ⚠️ The tagged commit `9172964` carries a RED `Publish` check
 
-- `36577469545` — failed: root project had no `repositories`, so NMCP's check task could not resolve `nmcp-tasks`. Failed *before* any upload. Fixed in `9172964`.
-- `36578027259` — failed: HTTP 409 on GitHub Packages, because the *earlier* run had already published `0.1.0` and GitHub Packages does not allow overwriting a version. Packages were deleted, and `36578312902` then succeeded on the same SHA.
+**Verified via `gh api .../commits/9172964.../check-runs`.** There are 5 check-runs on that commit; **4 green, 1 red**:
 
-`36578312902` (Publish) and `36578024445` (build) are both **success** on `9172964`, which is the tagged commit. All three artifacts independently re-verified as **HTTP 200** on Maven Central.
+| Conclusion | Check | Run |
+|---|---|---|
+| success | `build` | `36578024445` |
+| success | `Build & Test` | `36578027259` |
+| **failure** | **`Publish`** | **`36578027259`** |
+| success | `Build & Test` | `36578312902` |
+| success | `Publish` | `36578312902` |
 
-### Synapse — the red runs are NOT superseded
+- Red check: https://github.com/IamCoder18/engram/actions/runs/36578027259/job/109438915220
+- **This red check is permanent and cannot be made green by re-running.** Re-running would 409 again, because `0.1.0` still exists in GitHub Packages. The only way to clear it would be to delete `0.1.0` and re-publish, which is not worth doing for a superseded run of the same commit.
+- `36578312902` (same SHA, manual dispatch) posted a later green `Publish`, so the release itself is fine. But the red X from `36578027259` remains in the run history and in the checks list, and it is real — not a stale artifact of a different commit.
 
-Unlike engram, the Synapse `Docker image` failures are **current, ongoing, and unfixed**. Do not read the engram note above as covering them. See "Synapse `main` CI is RED" above.
+### Two earlier claims in this file were WRONG — corrected here
+
+**1. `36577469545` is not a run of `9172964`.** Verified: `head_sha` is `78fdbce6` (the parent commit, "Add Maven Central and GitHub Packages publishing"). It is run #1 of the `v0.1.0` tag, from before the tag was force-moved to `9172964`. `gh run list --commit 9172964...` returns only 3 runs, and this is not among them.
+
+**2. It did NOT "fail before any upload."** That was flatly wrong. Its steps were:
+
+| Step | Conclusion |
+|---|---|
+| Publish to GitHub Packages | **success** — uploaded `0.1.0` for all 3 modules, 1m37s of real network work |
+| Publish to Maven Central | **failure** — `:nmcpCheckAggregationFiles`, `no repositories are defined` |
+
+So `36577469545` **is** the run that performed the actual first upload of `0.1.0` to GitHub Packages (~13:47). The error is only true of the *Central* step. The original wording was almost certainly over-generalised from the `build.gradle` comment added in `9172964`, which describes the Central path only:
+
+```gradle
+// without this the publish fails at nmcpCheckAggregationFiles with
+// "no repositories are defined" before uploading anything.
+```
+
+**3. GitHub Packages *does* refuse to overwrite — do not "refute" this.** A later analysis concluded this was disproved because `36578312902` re-published `0.1.0` successfully. That inference is wrong: the `0.1.0` packages were **deleted between the two runs**, which is exactly why the re-publish succeeded. The 409 behaviour was real and is precisely what the deletion worked around.
+
+### Actual sequence
+
+1. `13:45:29` — tag `v0.1.0` pushed at `78fdbce`. Run `36577469545`: GitHub Packages upload **succeeds**, Central step fails (`no repositories are defined`).
+2. `13:49:52` — `9172964` committed; tag force-moved to it.
+3. `13:49:58` — tag push re-fires. Run `36578027259`: **409 Conflict** on GitHub Packages, because `0.1.0` already exists from step 1. Central step skipped.
+4. Packages for `0.1.0` **deleted**.
+5. `13:52:11` — manual dispatch. Run `36578312902`: **succeeds** on both registries.
+6. `13:56:55` — Central sync completes externally.
+
+### Provenance of the live artifacts — independently verified
+
+All three `0.1.0` artifacts live on **both** registries, from run `36578312902`, and are byte-identical across them. Re-verified just now, independently of the earlier analysis:
+
+- `engram-recorder-0.1.0.jar` from Central: `db953708…32fcb`, 37,117 bytes — matches the GitHub Packages copy exactly.
+- Central `last-modified: Tue, 29 Sep 2026 13:56:55 GMT` for all 6 files — consistent with `36578312902`, the only run that ever contacted Central.
+- GitHub Packages `created_at` timestamps (13:53:40 / 13:54:21) fall inside that run's window, not the 13:47 upload.
+- Local `build/libs/*.jar` differ from the published bytes (jar entry timestamps vary between builds). Expected — **the live artifacts are the CI build from `9172964`, not the local working copy.**
+
+### Is anything broken?
+
+**No.** `main` HEAD is green (`build` → success). No branch protection exists, so no required-check gate is blocked. The release is usable and verified. The residue is cosmetic-but-real: one permanently red `Publish` run attached to the tagged commit.
+
+---
+
+## Synapse `main` CI is also red (separate, pre-existing, unrelated)
